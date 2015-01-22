@@ -223,6 +223,8 @@ module.exports = (function (window) {
 
 		this.parent = parent;
 		this.id = id;
+		this.startIndex = -1;
+		this.endIndex = -1;
 
 		eventEmitterize(this);
 
@@ -281,8 +283,11 @@ module.exports = (function (window) {
 							end = that.start + duration;
 						}
 					}
-					that.end = Math.max(that.start, end);
-					that.emit('durationchange', duration);
+					end = Math.max(that.start, end);
+					if (end !== that.end) {
+						that.end = end;
+						that.emit('timechange', duration);
+					}
 				}
 			}
 		};
@@ -332,6 +337,8 @@ module.exports = (function (window) {
 		};
 
 		this.destroy = function () {
+			that.deactivate();
+
 			parent.remove(id);
 
 			that.removeAllListeners();
@@ -360,6 +367,7 @@ module.exports = (function (window) {
 			duration: NaN
 		};
 
+		//todo: make these into setters or methods so they trigger "timechange" event
 		this.start = parseTimeCode(options.start) || 0;
 		this.end = parseTimeCode(options.end);
 		/*
@@ -435,8 +443,8 @@ module.exports = (function (window) {
 			clipsByEnd = [],
 			clipsById = {},
 			activeClips = {},
-			startIndex = 0,
-			endIndex = 0,
+			startIndex = -1,
+			endIndex = -1,
 
 			id;
 
@@ -489,9 +497,11 @@ module.exports = (function (window) {
 			return compositor;
 		}
 
-		function update() {
+		function update(force) {
 			var currentTime,
-				rightNow = now();
+				rightNow = now(),
+				direction = 1,
+				forward = true;
 
 			if (playing) {
 				currentTime = (rightNow - lastUpdateTime) * playerState.playbackRate;
@@ -500,13 +510,25 @@ module.exports = (function (window) {
 			}
 			lastUpdateTime = now();
 
-			if (Math.abs(currentTime - playerState.currentTime) < 0.5) {
+			/*
+			todo: come up with a better criterion for running update,
+			remove boolean trap
+			*/
+			if (!force && Math.abs(currentTime - playerState.currentTime) < 0.5) {
 				return;
+			}
+
+			if (currentTime < playerState.currentTime) {
+				forward = false;
+				direction = -1;
 			}
 
 			playerState.currentTime = currentTime;
 
 			//todo: go through all clips that need to be updated, started or stopped
+			if (forward) {
+			} else {
+			}
 
 			//todo: if any one clip's currentTime is too far off expected value, fire 'waiting'
 			//todo: if timeController is no longer active, select a new one
@@ -535,6 +557,55 @@ module.exports = (function (window) {
 				cancelAnimationFrame(animationRequestId);
 				animationRequestId = requestAnimationFrame(draw);
 			}
+		}
+
+		function updateClipTimes(clip) {
+			var i, min = Infinity;
+
+			//place clip into appropriate point in each queue
+			if (clip.startIndex >= 0) {
+				min = clip.startIndex;
+				clipsByStart.splice(clip.startIndex, 1);
+				if (startIndex > clip.startIndex) {
+					startIndex--;
+				}
+			}
+			i = binarySearch(clipsByStart, clip, compareClipsByStart);
+			i = ~i; // jshint ignore:line
+			min = Math.min(min, i);
+			if (i <= startIndex) {
+				startIndex++;
+			}
+			clipsByStart.splice(i, 0, clip);
+			for (i = min; i < clipsByStart.length; i++) {
+				clipsByStart[i].startIndex = i;
+			}
+
+			min = Infinity;
+			if (clip.endIndex >= 0) {
+				clipsByEnd.splice(clip.endIndex, 1);
+				if (endIndex > clip.endIndex) {
+					endIndex--;
+				}
+			}
+			i = binarySearch(clipsByEnd, clip, compareClipsByEnd);
+			i = ~i; // jshint ignore:line
+			min = Math.min(min, i);
+			if (i <= endIndex) {
+				endIndex++;
+			}
+			clipsByEnd.splice(i, 0, clip);
+			for (i = min; i < clipsByEnd.length; i++) {
+				clipsByEnd[i].endIndex = i;
+			}
+
+			update(true);
+
+			/*
+			todo:
+			- set any missing start times
+			- recalculate total duration if there's nothing left in the queue
+			*/
 		}
 
 		/*
@@ -577,36 +648,20 @@ module.exports = (function (window) {
 			*/
 			clip = new Clip(this, plugins[hook], options);
 
-			clip.on('durationchange', function (metadata) {
-				/*
-				todo:
-				- set any missing start times
-				- re-sort all clips
-				- pass this along to compositors? or let compositors register listener on its own
-				*/
-			});
-
 			/*
 			todo: keep a queue of clips that are missing start times and append them
 			once all clips before have been given a duration
 			*/
 
-			i = binarySearch(clipsByStart, clip, compareClipsByStart);
-			if (i < 0) {
-				clipsByStart.splice(~i, 0, clip); // jshint ignore:line
-			}
-
-			i = binarySearch(clipsByEnd, clip, compareClipsByEnd);
-			if (i < 0) {
-				clipsByEnd.splice(~i, 0, clip); // jshint ignore:line
-			}
-
 			clipsById[clip.id] = clip;
 
 			/*
-			todo: add listener to clip for when it changes and re-sort if
+			add listener to clip for when it changes and re-sort if
 			start/end time are different
 			*/
+			clip.on('timechange', function () {
+				updateClipTimes(clip);
+			});
 
 			forEach(compositors, function (compositor) {
 				//todo: make sure it supports this type of clip
@@ -614,6 +669,8 @@ module.exports = (function (window) {
 					compositor.add.call(spacetime, clip);
 				}
 			});
+
+			updateClipTimes(clip);
 		};
 
 		//remove a clip
@@ -622,10 +679,7 @@ module.exports = (function (window) {
 				i;
 
 			if (clip) {
-				/*
-				todo: remove any listeners on this clip
-				only necessary if we don't destroy the clip
-				*/
+				clip.deactivate();
 
 				forEach(compositors, function (compositor) {
 					//todo: make sure it supports this type of clip
@@ -634,20 +688,38 @@ module.exports = (function (window) {
 					}
 				});
 
-				i = binarySearch(clipsByStart, clip, compareClipsByStart);
+				i = clip.startIndex;
+				if (i < 0 || clipsByStart[i] !== clip) {
+					i = binarySearch(clipsByStart, clip, compareClipsByStart);
+				}
 				if (i >= 0) {
 					clipsByStart.splice(i, 1);
+					if (startIndex >= i) {
+						startIndex--;
+					}
+					for (; i < clipsByStart.length; i++) {
+						clipsByStart[i].startIndex = i;
+					}
 				}
 
-				i = binarySearch(clipsByEnd, clip, compareClipsByEnd);
+				i = clip.endIndex;
+				if (i < 0 || clipsByEnd[i] !== clip) {
+					i = binarySearch(clipsByEnd, clip, compareClipsByEnd);
+				}
 				if (i >= 0) {
 					clipsByEnd.splice(i, 1);
+					if (endIndex >= i) {
+						endIndex--;
+					}
+					for (; i < clipsByEnd.length; i++) {
+						clipsByEnd[i].endIndex = i;
+					}
 				}
 
 				delete clipsById[clipId];
 
 				//todo: destroy the clip?
-				clip.removeAllListeners('durationchange');
+				clip.removeAllListeners('timechange');
 			}
 		};
 
@@ -953,6 +1025,8 @@ module.exports = (function (window) {
 				//returns object to be operated upon
 				//if throws or returns false, add fails
 				//todo: just return the dom element object
+
+				//todo: add to dom under container
 			},
 			activate: function (clip, element) {
 				element.classList.add(activeClass);
