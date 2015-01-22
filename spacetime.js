@@ -23,12 +23,13 @@
 		console = window.console,
 
 	/*
-		Global environment variables
+		Global "environment" variables
 	*/
 
-	maxSpacetimeId = 0,
+	maxGlobalId = Date.now(), //todo: come up with something better than this
 	nop = function () {},
 	plugins = {},
+	compositors = {},
 	allClipsByType = {},
 
 	/*
@@ -47,6 +48,7 @@
 		'videoWidth'
 	],
 
+	// boolean value represents whether this is a writeable property
 	clipPlayerMethods = {
 		play: false,
 		pause: false,
@@ -66,6 +68,8 @@
 		destroy: false
 	},
 
+	timeCodeRegex = /^(?:(?:([0-9]+):)?(?:([0-9]+):))?(([0-9]+)(?:([.;])([0-9]+)))?$/,
+
 	/*
 	todo: shims and API status
 	- requestAnimationFrame, cancelAnimationFrame
@@ -76,6 +80,30 @@
 	/*
 		utility functions
 	*/
+
+	function guid(prefix) {
+		//todo: do a better job of converting prefix to a string
+		var id = (prefix || '') + maxGlobalId;
+		maxGlobalId++;
+		return id;
+	}
+
+	function findFirst(array, callback, thisArg) {
+		var i, n, value;
+
+		if (array.find) {
+			return array.find(callback, thisArg);
+		}
+
+		for (i = 0, n = array.length; i < n; i++) {
+			value = array[i];
+			if (callback.call(thisArg, value, i, array)) {
+				return value;
+			}
+		}
+
+		return undefined;
+	}
 
 	function extend(dest, src) {
 		var property,
@@ -130,6 +158,40 @@
 		return function () {
 			method.apply(console, arguments);
 		};
+	}
+
+	function parseTimeCode(timecode, frameRate) {
+		var match,
+			hour = 0,
+			minute = 0,
+			second = 0;
+
+		if (typeof timecode === 'number') {
+			return timecode;
+		}
+
+		if (typeof timecode === 'string') {
+			match = timeCodeRegex.exec(timecode);
+			if (match) {
+				if (match[1]) {
+					hour = parseInt(match[1], 10);
+				}
+				if (match[2]) {
+					minute = parseInt(match[2], 10);
+				}
+				if (match[5] === '.') {
+					second += parseFloat(match[3]);
+				} else {
+					second = parseInt(match[4], 10);
+					if (match[5] === ';' && frameRate > 0) {
+						second += parseInt(match[6], 10) / frameRate;
+					}
+				}
+				return (hour * 60 + minute) * 60 + second;
+			}
+		}
+
+		return NaN;
 	}
 
 	//todo: see if there's existing code that does this
@@ -387,15 +449,9 @@
 	*/
 
 	function Clip(parent, plugin, options) {
-		var id, //todo: generate id. allow forced id?
+		var id = guid('spacetime'), //todo: allow forced id?
 			that = this,
 			playerMethods = {};
-
-		/*
-		Match loading states of HTMLMediaElement
-		- allow `modify` method to determine whether to reset/empty state, based on properties changed
-		- property changes that make it less "loaded" should trigger state reset
-		*/
 
 		function reset(player) {
 			//todo: do we need more parameters?
@@ -428,12 +484,6 @@
 
 			var key;
 
-			/*
-			todo:
-			- reset readyState, networkState
-			- fire emptied, abort, whatever necessary events
-			*/
-
 			player = typeof player === 'object' && player;
 			for (key in clipPlayerMethods) {
 				if (hasOwn(clipPlayerMethods, key)) {
@@ -443,9 +493,24 @@
 			}
 
 			//todo: what about a method for getting buffered sections?
+
+			/*
+			todo: if cannot play currently set source object, fire error
+			- name: "MediaError",
+			- message: "Media Source Not Supported",
+			- code: MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+			*/
+
+			/*
+			todo:
+			- reset readyState, networkState
+			- fire emptied, abort, whatever necessary events
+			*/
+
 		}
 
 		this.parent = parent;
+		this.id = id;
 
 		eventEmitterize(this);
 
@@ -513,24 +578,44 @@
 			this.emit('deactivate');
 		};
 
+		this.destroy = function () {
+			parent.remove(id);
+
+			this.removeAllListeners();
+			//todo: clean up
+		};
+
+		this.src = function (src) {
+			/*
+			todo: we need a callback function that checks if the old source and new source have changed
+			- only reset if it has changed
+			- otherwise we can update it and call modify but don't need to reset
+			- e.g. src on video needs reset; new text for a text effect does not
+			- anything that makes buffered go backwards should cause a reset (or change duration?)
+			*/
+		};
+
 		this.reset = reset;
 
 		options = extend({}, options);
+		plugin = extend({}, plugin);
 		if (plugin.definition) {
 			plugin = extend(plugin, plugin.definition.call(this, options));
 		}
 
+		this.start = parseTimeCode(options.start) || 0;
+
 		//todo: is this audio, video or other?
 		reset(plugin.player);
-
 	}
 
 	function Spacetime(opts) {
 		//initialize object, private properties
 		var options = opts || {},
-			id,
 			spacetime = this,
 			isDestroyed = false,
+			videoCompositor,
+			audioCompositor,
 
 			/*
 			todo: move most of the below stuff into an object that can be accessed by modules
@@ -569,6 +654,7 @@
 
 			//time control
 			lastUpdateTime = 0,
+			lastCurrentTime = -1,
 			playing = false, //is time actually progressing?
 
 			autoDraw,
@@ -585,7 +671,37 @@
 			clipsById = {},
 			activeClips = {},
 			startIndex = 0,
-			endIndex = 0;
+			endIndex = 0,
+
+			id,
+			key;
+
+		function loadCompositor(list, type, def) {
+			var compositor,
+				name;
+
+			if (list && !Array.isArray(list)) {
+				if (typeof list === 'string') {
+					list = [list];
+				} else {
+					list = [];
+				}
+			}
+			name = findFirst((list || []).concat(def), function (id) {
+				var comp = compositors[id];
+				return comp && comp.type === type &&
+					(!comp.compatible || comp.compatible());
+			});
+
+			//there should always be at least the default compositor that's compatible and loaded
+			compositor = compositors[name];
+			compositor = extend({}, compositor);
+			if (compositor.definition) {
+				compositor = extend(compositor, compositor.definition.call(spacetime, options));
+			}
+
+			return compositor;
+		}
 
 		function update() {
 			var currentTime,
@@ -593,6 +709,8 @@
 
 			if (playing) {
 				currentTime = (rightNow - lastUpdateTime) * playerState.playbackRate;
+			} else {
+				currentTime = playerState.currentTime;
 			}
 			lastUpdateTime = now();
 
@@ -601,9 +719,17 @@
 			}
 
 			playerState.currentTime = currentTime;
+
 			//todo: go through all clips that need to be updated, started or stopped
+
 			//todo: if any one clip's currentTime is too far off expected value, fire 'waiting'
 			//todo: if timeController is no longer active, select a new one
+			//todo: tell clips which ones need to be loaded
+
+			//todo: maybe throttle this? could be an option
+			spacetime.emit('timeupdate');
+
+			lastCurrentTime = currentTime;
 		}
 
 		function draw() {
@@ -612,6 +738,12 @@
 			}
 
 			//todo: go through all clips that need to be redrawn
+			if (videoCompositor && videoCompositor.draw) {
+				videoCompositor.draw.call(spacetime);
+			}
+			if (audioCompositor && audioCompositor.draw) {
+				audioCompositor.draw.call(spacetime);
+			}
 
 			if (autoDraw) {
 				cancelAnimationFrame(animationRequestId);
@@ -619,12 +751,20 @@
 			}
 		}
 
-		maxSpacetimeId++;
-		id = maxSpacetimeId;
+		/*
+		Match loading states of HTMLMediaElement
+		- allow `modify` method to determine whether to reset/empty state, based on properties changed
+		- property changes that make it less "loaded" should trigger state reset
+		*/
+
+		//select compositors
+		audioCompositor = loadCompositor(options.audioCompositor, 'audio', 'basic-audio');
+		videoCompositor = loadCompositor(options.videoCompositor, 'video', 'dom-video');
+		//todo: allow arbitrary data tracks and a compositor for each one?
+
+		id = guid('spacetime');
 
 		this.logger = extend(Spacetime.logger);
-
-		eventEmitterize(this);
 
 		this.id = function () {
 			return id;
@@ -637,18 +777,80 @@
 		//add or update a clip
 		//todo: allow batch loading of multiple clips
 		this.add = function (hook, options) {
+			/*
+			todo: smart loading to infer hook by cycling through all plugins,
+			running canPlaySrc on each one
+			*/
 			var clip = new Clip(this, plugins[hook], options);
+
+			clipsById[clip.id] = clip;
+			clipsByEnd.push(clip);
+			clipsByStart.push(clip);
+
+			/*
+			todo: sort clips by start time and by end time
+			or do a binary search/insertion
+			*/
+
+			/*
+			todo: add listener to clip for when it changes and re-sort if
+			start/end time are different
+			*/
+
+			if (videoCompositor && videoCompositor.add) {
+				videoCompositor.add.call(spacetime, clip);
+			}
+			if (audioCompositor && audioCompositor.add) {
+				audioCompositor.add.call(spacetime, clip);
+			}
 		};
 
 		//remove a clip
 		this.remove = function (clipId) {
+			var clip = clipsById[clipId],
+				i;
+
+			if (clip) {
+				/*
+				todo: remove any listeners on this clip
+				only necessary if we don't destroy the clip
+				*/
+
+				if (videoCompositor && videoCompositor.remove) {
+					videoCompositor.remove.call(spacetime, clip);
+				}
+				if (audioCompositor && audioCompositor.remove) {
+					audioCompositor.remove.call(spacetime, clip);
+				}
+
+				/*
+				if we find we're using lots and lots of clips,
+				it may be faster to binary search based on start/end times
+				*/
+				i = clipsByStart.indexOf(clip);
+				if (i >= 0) {
+					clipsByStart.splice(i, 1);
+				}
+				i = clipsByEnd.indexOf(clip);
+				if (i >= 0) {
+					clipsByEnd.splice(i, 1);
+				}
+				delete clipsById[clipId];
+				//todo: destroy the clip?
+			}
 		};
+
+		/*
+		todo: add a method to test if a prospective clip is compatible, i.e.:
+		- there is a plugin that canPlay the clip
+		- the currently loaded compositor can handle both the plugin and the clip
+		*/
 
 		//todo list/search clips by time or hook
 
 		//todo: set/get "global" properties
 
-		//todo: event emitter
+		eventEmitterize(this);
 		//todo: first, next promises
 
 		/*
@@ -700,6 +902,25 @@
 			}
 		});
 
+		/*
+		todo: more writeable properties
+		- loop
+		- width
+		- height
+		- src (runs this.clip)
+		- autoplay
+		- controls?
+		- crossOrigin?
+		- defaultMuted?
+		- defaultPlaybackRate?
+		- muted
+		- playbackRate
+		- poster?
+		- preload
+		- preservesPitch?
+		- volume
+		*/
+
 		//set up all read-only 'properties'
 		readOnlyProperties.forEach(function (property) {
 			Object.defineProperty(spacetime, property, {
@@ -716,9 +937,28 @@
 		*/
 
 		this.destroy = function () {
+			var key;
+
 			isDestroyed = true;
 
+			cancelAnimationFrame(animationRequestId);
+
 			spacetime.removeAllListeners();
+
+			for (key in clipsById) {
+				if (hasOwn(clipsById, key)) {
+					this.remove(key);
+				}
+			}
+
+			if (videoCompositor && videoCompositor.destroy) {
+				videoCompositor.destroy();
+			}
+			if (audioCompositor && audioCompositor.destroy) {
+				audioCompositor.destroy();
+			}
+
+			//todo: neutralize all methods, reset state, etc.
 		};
 
 		this.isDestroyed = function () {
@@ -798,8 +1038,62 @@
 		}
 
 		delete plugins[hook];
+	};
 
-		return;
+	Spacetime.compositor = function (hook, definition, meta) {
+		if (compositors[hook]) {
+			Spacetime.logger.warn('Compositor [' + hook + '] already loaded');
+			return false;
+		}
+
+		if (meta === undefined && typeof definition === 'object') {
+			meta = definition;
+		}
+
+		if (!meta.type) {
+			/*
+			todo: does it need to be one of the pre-defined compositor types? (video, audio, data) probably not
+			*/
+			Spacetime.logger.error('Cannot define compositor [' + hook + '] without a type');
+			return;
+		}
+
+		/*
+		if (!meta) {
+			return false;
+		}
+		*/
+
+		meta = extend({}, meta);
+
+		if (typeof definition === 'function') {
+			meta.definition = definition;
+		}
+
+		if (!meta.title) {
+			meta.title = hook;
+		}
+
+		compositors[hook] = meta;
+
+		return true;
+	};
+
+	Spacetime.removeCompositor = function (hook) {
+		var all, compositor;
+
+		if (!hook) {
+			return;
+		}
+
+		plugin = compositors[hook];
+
+		/*
+		todo: throw an error if any compositions are using it or destroy them?
+		In practice, this is probably just here for cleaning up unit tests
+		*/
+
+		delete compositors[hook];
 	};
 
 	/*
@@ -815,7 +1109,8 @@
 	Utilities
 	*/
 	Spacetime.util = Spacetime.prototype.util = {
-		now: now
+		now: now,
+		parseTimeCode: parseTimeCode
 		//todo: requestAnimationFrame, cancelAnimationFrame. make sure to account for missing requestID
 	};
 
@@ -833,8 +1128,62 @@
 			starTime;
 
 		return {
-
 		};
+	});
+
+	Spacetime.compositor('dom-video', function (container, options) {
+		//this part runs when a new composition is created
+		var activeClass = options && options.activeClass || 'active';
+		return {
+			//for when parent container is set or changes
+			parent: function (parent) {
+			},
+			move: function (clip) {
+				//todo: set which layer this clip goes to. z-index, I guess? or sort order
+			},
+			add: function (clip) {
+				//new clip is added to the composition
+				//returns object to be operated upon
+				//if throws or returns false, add fails
+				//todo: just return the dom element object
+			},
+			activate: function (clip, element) {
+				element.classList.add(activeClass);
+			},
+			deactivate: function (clip, element) {
+				element.classList.remove(activeClass);
+			},
+			remove: function (clip, element) {
+				//clip is removed from composition
+				//todo: may not need to do anything here
+			},
+			destroy: function () {
+				//composition is destroyed
+			}
+		};
+	}, {
+		title: 'DOM Video',
+		type: 'video'
+	});
+
+	/*
+	todo: do we allow a single compositor to support both audio and video?
+	todo: what about data tracks?
+	*/
+	Spacetime.compositor('basic-audio', function () {
+		return {
+			properties: {
+				volume: function (element, volume) {
+					element.volume = Math.max(0, Math.min(1, volume));
+				},
+				muted: function (element, muted) {
+					element.muted = !!muted;
+				}
+			}
+		};
+	}, {
+		title: 'Basic Audio',
+		type: 'audio'
 	});
 
 	return Spacetime;
