@@ -276,22 +276,22 @@ module.exports = (function (window) {
 				playerMethods.activate();
 			}
 			//todo: if parent is playing, try to play
-			//this.play();
-			this.emit('activate');
+			//that.play();
+			that.emit('activate');
 		};
 
 		this.deactivate = function () {
 			if (playerMethods.deactivate) {
 				playerMethods.deactivate();
 			}
-			this.pause();
-			this.emit('deactivate');
+			that.pause();
+			that.emit('deactivate');
 		};
 
 		this.destroy = function () {
 			parent.remove(id);
 
-			this.removeAllListeners();
+			that.removeAllListeners();
 			//todo: clean up
 		};
 
@@ -496,6 +496,11 @@ module.exports = (function (window) {
 			running canPlaySrc on each one
 			*/
 			var clip = new Clip(this, plugins[hook], options);
+
+			/*
+			todo: keep a queue of clips that are missing start times and append them
+			once all clips before have been given a duration
+			*/
 
 			clipsById[clip.id] = clip;
 			clipsByEnd.push(clip);
