@@ -1,4 +1,4 @@
-module.exports = (function (window, undefined) {
+module.exports = (function (window) {
 	'use strict';
 
 	var document = window.document,
@@ -88,6 +88,10 @@ module.exports = (function (window, undefined) {
 		return undefined;
 	}
 
+	function hasOwn(obj, property) {
+		return Object.prototype.hasOwnProperty.call(obj, property);
+	}
+
 	function extend(dest, src) {
 		var property,
 			descriptor;
@@ -114,10 +118,6 @@ module.exports = (function (window, undefined) {
 		}
 
 		return dest;
-	}
-
-	function hasOwn(obj, property) {
-		return Object.prototype.hasOwnProperty.call(obj, property);
 	}
 
 	function consoleMethod(name) {
@@ -513,8 +513,7 @@ module.exports = (function (window, undefined) {
 			startIndex = 0,
 			endIndex = 0,
 
-			id,
-			key;
+			id;
 
 		function loadCompositor(list, type, def) {
 			var compositor,
