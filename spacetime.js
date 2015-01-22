@@ -440,6 +440,28 @@ module.exports = (function (window) {
 
 			id;
 
+		function compareClipsByStart(a, b) {
+			var diff = a.start - b.start ||
+				(a.end || a.start) - (b.end || b.start);
+
+			if (!diff) {
+				return a.id < b.id ? -1 : a !== b ? 1 : 0;
+			}
+
+			return diff;
+		}
+
+		function compareClipsByEnd(a, b) {
+			var diff = (a.end || a.start) - (b.end || b.start) ||
+				a.start - b.start;
+
+			if (!diff) {
+				return a.id < b.id ? -1 : a !== b ? 1 : 0;
+			}
+
+			return diff;
+		}
+
 		function loadCompositor(list, type, def) {
 			var compositor,
 				name;
@@ -548,7 +570,7 @@ module.exports = (function (window) {
 		//todo: allow batch loading of multiple clips
 		this.add = function (hook, options) {
 			var clip,
-				index;
+				i;
 			/*
 			todo: smart loading to infer hook by cycling through all plugins,
 			running canPlaySrc on each one
@@ -569,29 +591,15 @@ module.exports = (function (window) {
 			once all clips before have been given a duration
 			*/
 
-			index = binarySearch(clipsByStart, clip, function (a, b) {
-				var diff = a.start - b.start ||
-					(a.end || a.start) - (b.end || b.start);
+			i = binarySearch(clipsByStart, clip, compareClipsByStart);
+			if (i < 0) {
+				clipsByStart.splice(~i, 0, clip); // jshint ignore:line
+			}
 
-				if (!diff) {
-					return a.id < b.id ? -1 : 1;
-				}
-
-				return diff;
-			});
-			clipsByStart.splice(index >= 0 ? index : ~index, 0, clip); // jshint ignore:line
-
-			index = binarySearch(clipsByEnd, clip, function (a, b) {
-				var diff = (a.end || a.start) - (b.end || b.start) ||
-					a.start - b.start;
-
-				if (!diff) {
-					return a.id < b.id ? -1 : 1;
-				}
-
-				return diff;
-			});
-			clipsByEnd.splice(index >= 0 ? index : ~index, 0, clip); // jshint ignore:line
+			i = binarySearch(clipsByEnd, clip, compareClipsByEnd);
+			if (i < 0) {
+				clipsByEnd.splice(~i, 0, clip); // jshint ignore:line
+			}
 
 			clipsById[clip.id] = clip;
 
@@ -626,30 +634,12 @@ module.exports = (function (window) {
 					}
 				});
 
-				i = binarySearch(clipsByStart, clip, function (a, b) {
-					var diff = a.start - b.start ||
-						(a.end || a.start) - (b.end || b.start);
-
-					if (!diff) {
-						return a.id < b.id ? -1 : a !== b ? 1 : 0;
-					}
-
-					return diff;
-				});
+				i = binarySearch(clipsByStart, clip, compareClipsByStart);
 				if (i >= 0) {
 					clipsByStart.splice(i, 1);
 				}
 
-				i = binarySearch(clipsByEnd, clip, function (a, b) {
-					var diff = (a.end || a.start) - (b.end || b.start) ||
-						a.start - b.start;
-
-					if (!diff) {
-						return a.id < b.id ? -1 : a !== b ? 1 : 0;
-					}
-
-					return diff;
-				});
+				i = binarySearch(clipsByEnd, clip, compareClipsByEnd);
 				if (i >= 0) {
 					clipsByEnd.splice(i, 1);
 				}
@@ -657,7 +647,7 @@ module.exports = (function (window) {
 				delete clipsById[clipId];
 
 				//todo: destroy the clip?
-				clip.removeAllListeners('loadedmetadata');
+				clip.removeAllListeners('durationchange');
 			}
 		};
 
