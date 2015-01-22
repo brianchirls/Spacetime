@@ -179,13 +179,13 @@ module.exports = (function (window) {
 						} else if (writeable) {
 							playerMethods[methodName] = function (value) {
 								if (value !== undefined) {
-									player[method] = value;
+									player[methodName] = value;
 								}
-								return player[method];
+								return player[methodName];
 							};
 						} else {
 							playerMethods[methodName] = function () {
-								return player[method];
+								return player[methodName];
 							};
 						}
 					}
@@ -218,6 +218,7 @@ module.exports = (function (window) {
 			- reset readyState, networkState
 			- fire emptied, abort, whatever necessary events
 			*/
+			that.metadata.duration = NaN;
 		}
 
 		this.parent = parent;
@@ -244,6 +245,47 @@ module.exports = (function (window) {
 		- compatible
 		- report buffered, seekable ranges
 		*/
+
+		this.loadMetadata = function (values) {
+			var k,
+				duration,
+				metadata = that.metadata,
+				changed = false,
+				durationchange = false,
+				end;
+
+			//todo: make sure duration is not negative or Infinity
+			duration = values.duration;
+			if (isNaN(duration)) {
+				duration = metadata.duration;
+			} else if (metadata.duration !== duration) {
+				metadata.duration = duration || NaN;
+				durationchange = true;
+			}
+
+			for (k in values) {
+				if (values.hasOwnProperty(k) && metadata[k] !== values[k]) {
+					metadata[k] = values[k];
+					changed = true;
+				}
+			}
+			if (changed) {
+				that.emit('loadedmetadata', metadata);
+
+				if (durationchange) {
+					if (isNaN(duration)) {
+						end = that.start;
+					} else {
+						end = parseTimeCode(options.end);
+						if (isNaN(end)) {
+							end = that.start + duration;
+						}
+					}
+					that.end = Math.max(that.start, end);
+					that.emit('durationchange', duration);
+				}
+			}
+		};
 
 		/*
 		todo: export publicly accessible object with fewer methods
@@ -313,6 +355,10 @@ module.exports = (function (window) {
 		if (plugin.definition) {
 			plugin = extend(plugin, plugin.definition.call(this, options));
 		}
+
+		this.metadata = {
+			duration: NaN
+		};
 
 		this.start = parseTimeCode(options.start) || 0;
 		this.end = parseTimeCode(options.end);
@@ -509,6 +555,15 @@ module.exports = (function (window) {
 			*/
 			clip = new Clip(this, plugins[hook], options);
 
+			clip.on('durationchange', function (metadata) {
+				/*
+				todo:
+				- set any missing start times
+				- re-sort all clips
+				- pass this along to compositors? or let compositors register listener on its own
+				*/
+			});
+
 			/*
 			todo: keep a queue of clips that are missing start times and append them
 			once all clips before have been given a duration
@@ -600,7 +655,9 @@ module.exports = (function (window) {
 				}
 
 				delete clipsById[clipId];
+
 				//todo: destroy the clip?
+				clip.removeAllListeners('loadedmetadata');
 			}
 		};
 
