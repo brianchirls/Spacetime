@@ -272,7 +272,7 @@ module.exports = (function (window) {
 				}
 			}
 			if (changed) {
-				that.emit('loadedmetadata', metadata);
+				that.emit('loadedmetadata', that, metadata);
 
 				if (durationchange) {
 					if (isNaN(duration)) {
@@ -286,7 +286,7 @@ module.exports = (function (window) {
 					end = Math.max(that.start, end);
 					if (end !== that.end) {
 						that.end = end;
-						that.emit('timechange', duration);
+						that.emit('timechange', that, duration);
 					}
 				}
 			}
@@ -325,7 +325,7 @@ module.exports = (function (window) {
 			}
 			//todo: if parent is playing, try to play
 			//that.play();
-			that.emit('activate');
+			that.emit('activate', that);
 		};
 
 		this.deactivate = function () {
@@ -333,7 +333,7 @@ module.exports = (function (window) {
 				playerMethods.deactivate();
 			}
 			that.pause();
-			that.emit('deactivate');
+			that.emit('deactivate', that);
 		};
 
 		this.destroy = function () {
@@ -495,6 +495,16 @@ module.exports = (function (window) {
 			}
 
 			return compositor;
+		}
+
+		function activateClip(clip) {
+			activeClips[clip.id] = clip;
+			//todo: update play/waiting state
+		}
+
+		function deactivateClip(clip) {
+			delete activeClips[clip.id];
+			//todo: update play/waiting state
 		}
 
 		function update(force) {
@@ -659,9 +669,9 @@ module.exports = (function (window) {
 			add listener to clip for when it changes and re-sort if
 			start/end time are different
 			*/
-			clip.on('timechange', function () {
-				updateClipTimes(clip);
-			});
+			clip.on('timechange', updateClipTimes);
+			clip.on('activate', activateClip);
+			clip.on('deactivate', deactivateClip);
 
 			forEach(compositors, function (compositor) {
 				//todo: make sure it supports this type of clip
@@ -719,7 +729,9 @@ module.exports = (function (window) {
 				delete clipsById[clipId];
 
 				//todo: destroy the clip?
-				clip.removeAllListeners('timechange');
+				clip.off('timechange', updateClipTimes);
+				clip.off('activate', activateClip);
+				clip.off('deactivate', deactivateClip);
 			}
 		};
 
