@@ -17,6 +17,8 @@
   },
   "homepage": "https://github.com/brianchirls/Spacetime",
   "devDependencies": {
+    "jshint": "^2.6.0",
+    "jshint-loader": "^0.8.1",
     "webpack": "^1.5.3"
   }
 }

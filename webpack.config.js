@@ -7,6 +7,15 @@ module.exports = {
         library: 'Spacetime',
         libraryTarget: 'umd'
     },
+    module: {
+        preLoaders: [
+            {
+                test: /\.js$/,
+                exclude: /node_modules/,
+                loader: 'jshint-loader'
+            }
+        ]
+    },
     resolve: {
         modulesDirectories: ["web_modules", "node_modules", "bower_components"]
     },
