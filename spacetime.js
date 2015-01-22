@@ -9,6 +9,7 @@ module.exports = (function (window) {
 	*/
 		eventEmitterize = require('./lib/event-emitterize'),
 		parseTimeCode = require('./lib/parse-timecode'),
+		forEach = require('lodash.foreach'),
 		nop = function () {},
 
 	/*
@@ -17,12 +18,17 @@ module.exports = (function (window) {
 
 		maxGlobalId = Date.now(), //todo: come up with something better than this
 		plugins = {},
-		compositors = {},
+		compositorPlugins = {},
 		allClipsByType = {},
 
 	/*
 		Global reference variables
 	*/
+		defaultCompositors = {
+			audio: 'basic-audio',
+			video: 'dom-video'
+			//todo: data, subtitles, 3d?
+		},
 
 		readOnlyProperties = [
 			'duration',
@@ -425,8 +431,7 @@ module.exports = (function (window) {
 		var options = opts || {},
 			spacetime = this,
 			isDestroyed = false,
-			videoCompositor,
-			audioCompositor,
+			compositors = {},
 
 			/*
 			todo: move most of the below stuff into an object that can be accessed by modules
@@ -498,13 +503,13 @@ module.exports = (function (window) {
 				}
 			}
 			name = findFirst((list || []).concat(def), function (id) {
-				var comp = compositors[id];
+				var comp = compositorPlugins[id];
 				return comp && comp.type === type &&
 					(!comp.compatible || comp.compatible());
 			});
 
 			//there should always be at least the default compositor that's compatible and loaded
-			compositor = compositors[name];
+			compositor = compositorPlugins[name];
 			compositor = extend({}, compositor);
 			if (compositor.definition) {
 				compositor = extend(compositor, compositor.definition.call(spacetime, options));
@@ -548,12 +553,12 @@ module.exports = (function (window) {
 			}
 
 			//todo: go through all clips that need to be redrawn
-			if (videoCompositor && videoCompositor.draw) {
-				videoCompositor.draw.call(spacetime);
-			}
-			if (audioCompositor && audioCompositor.draw) {
-				audioCompositor.draw.call(spacetime);
-			}
+
+			forEach(compositors, function (compositor) {
+				if (compositor && compositor.draw) {
+					compositor.draw.call(spacetime);
+				}
+			});
 
 			if (autoDraw) {
 				cancelAnimationFrame(animationRequestId);
@@ -568,9 +573,15 @@ module.exports = (function (window) {
 		*/
 
 		//select compositors
-		audioCompositor = loadCompositor(options.audioCompositor, 'audio', 'basic-audio');
-		videoCompositor = loadCompositor(options.videoCompositor, 'video', 'dom-video');
-		//todo: allow arbitrary data tracks and a compositor for each one?
+		forEach(
+			extend({
+				video: [],
+				audio: []
+			}, options.compositors),
+			function (list, type) {
+				compositors[type] = loadCompositor(list, type, defaultCompositors[type]);
+			}
+		);
 
 		id = guid('spacetime');
 
@@ -607,12 +618,12 @@ module.exports = (function (window) {
 			start/end time are different
 			*/
 
-			if (videoCompositor && videoCompositor.add) {
-				videoCompositor.add.call(spacetime, clip);
-			}
-			if (audioCompositor && audioCompositor.add) {
-				audioCompositor.add.call(spacetime, clip);
-			}
+			forEach(compositors, function (compositor) {
+				//todo: make sure it supports this type of clip
+				if (compositor && compositor.add) {
+					compositor.add.call(spacetime, clip);
+				}
+			});
 		};
 
 		//remove a clip
@@ -626,12 +637,12 @@ module.exports = (function (window) {
 				only necessary if we don't destroy the clip
 				*/
 
-				if (videoCompositor && videoCompositor.remove) {
-					videoCompositor.remove.call(spacetime, clip);
-				}
-				if (audioCompositor && audioCompositor.remove) {
-					audioCompositor.remove.call(spacetime, clip);
-				}
+				forEach(compositors, function (compositor) {
+					//todo: make sure it supports this type of clip
+					if (compositor && compositor.add) {
+						compositor.remove.call(spacetime, clip);
+					}
+				});
 
 				/*
 				if we find we're using lots and lots of clips,
@@ -761,12 +772,11 @@ module.exports = (function (window) {
 				}
 			}
 
-			if (videoCompositor && videoCompositor.destroy) {
-				videoCompositor.destroy();
-			}
-			if (audioCompositor && audioCompositor.destroy) {
-				audioCompositor.destroy();
-			}
+			forEach(compositors, function (compositor) {
+				if (compositor && compositor.destroy) {
+					compositor.destroy();
+				}
+			});
 
 			//todo: neutralize all methods, reset state, etc.
 		};
@@ -857,7 +867,7 @@ module.exports = (function (window) {
 	};
 
 	Spacetime.compositor = function (hook, definition, meta) {
-		if (compositors[hook]) {
+		if (compositorPlugins[hook]) {
 			Spacetime.logger.warn('Compositor [' + hook + '] already loaded');
 			return false;
 		}
@@ -890,7 +900,7 @@ module.exports = (function (window) {
 			meta.title = hook;
 		}
 
-		compositors[hook] = meta;
+		compositorPlugins[hook] = meta;
 
 		return true;
 	};
@@ -902,14 +912,14 @@ module.exports = (function (window) {
 			return;
 		}
 
-		plugin = compositors[hook];
+		plugin = compositorPlugins[hook];
 
 		/*
 		todo: throw an error if any compositions are using it or destroy them?
 		In practice, this is probably just here for cleaning up unit tests
 		*/
 
-		delete compositors[hook];
+		delete compositorPlugins[hook];
 	};
 
 	/*
