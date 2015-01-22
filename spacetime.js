@@ -318,7 +318,6 @@ module.exports = (function (window) {
 			- reset readyState, networkState
 			- fire emptied, abort, whatever necessary events
 			*/
-
 		}
 
 		this.parent = parent;
@@ -808,7 +807,13 @@ module.exports = (function (window) {
 			return false;
 		}
 		*/
-		//todo: meta object should include canPlayType (and canPlaySrc?) method/regex
+		/*todo:
+		- meta object should include canPlayType (and canPlaySrc?) method/regex
+		- meta object should have a list of track types supported and whether each is required, e.g.:
+		  - 'video' supports video, audio (neither required)
+		  - 'text' supports video, required
+		  - 'audio' supports audio, required
+		*/
 
 		type = extend({}, meta);
 

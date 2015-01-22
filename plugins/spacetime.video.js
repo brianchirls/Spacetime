@@ -81,7 +81,11 @@
 			*/
 		};
 	}, {
-		//canPlayType: 
-		//canPlaySrc:
+		/*
+		todo:
+		canPlayType:
+		canPlaySrc:
+		*/
+		compositors: ['dom-video', 'seriously']
 	});
 }));
