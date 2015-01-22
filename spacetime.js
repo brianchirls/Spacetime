@@ -55,9 +55,10 @@ module.exports = (function (window) {
 
 	/*
 	todo: shims and API status
-	- requestAnimationFrame, cancelAnimationFrame
 	- web audio API
 	*/
+	requestAnimationFrame = require('./lib/raf').requestAnimationFrame,
+	cancelAnimationFrame = require('./lib/raf').cancelAnimationFrame,
 	now;
 
 	/*
@@ -919,7 +920,7 @@ module.exports = (function (window) {
 	};
 
 	Spacetime.removeCompositor = function (hook) {
-		var all, compositor;
+		var all, compositor, plugin;
 
 		if (!hook) {
 			return;
