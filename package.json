@@ -15,5 +15,8 @@
   "bugs": {
     "url": "https://github.com/brianchirls/Spacetime/issues"
   },
-  "homepage": "https://github.com/brianchirls/Spacetime"
+  "homepage": "https://github.com/brianchirls/Spacetime",
+  "devDependencies": {
+    "webpack": "^1.5.3"
+  }
 }

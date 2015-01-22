@@ -1,2 +1,5 @@
 .DS_Store
 sandbox
+build
+node_modules
+bower_components
