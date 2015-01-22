@@ -3,14 +3,19 @@ module.exports = (function (window) {
 
 	var document = window.document,
 		console = window.console,
+
+	/*
+		Utility functions
+	*/
 		eventEmitterize = require('./lib/event-emitterize'),
+		parseTimeCode = require('./lib/parse-timecode'),
+		nop = function () {},
 
 	/*
 		Global "environment" variables
 	*/
 
 		maxGlobalId = Date.now(), //todo: come up with something better than this
-		nop = function () {},
 		plugins = {},
 		compositors = {},
 		allClipsByType = {},
@@ -50,8 +55,6 @@ module.exports = (function (window) {
 			//loop: true, this will probably be managed by Spacetime
 			destroy: false
 		},
-
-		timeCodeRegex = /^(?:(?:([0-9]+):)?(?:([0-9]+):))?(([0-9]+)(?:([.;])([0-9]+)))?$/,
 
 	/*
 	todo: shims and API status
@@ -142,40 +145,6 @@ module.exports = (function (window) {
 		return function () {
 			method.apply(console, arguments);
 		};
-	}
-
-	function parseTimeCode(timecode, frameRate) {
-		var match,
-			hour = 0,
-			minute = 0,
-			second = 0;
-
-		if (typeof timecode === 'number') {
-			return timecode;
-		}
-
-		if (typeof timecode === 'string') {
-			match = timeCodeRegex.exec(timecode);
-			if (match) {
-				if (match[1]) {
-					hour = parseInt(match[1], 10);
-				}
-				if (match[2]) {
-					minute = parseInt(match[2], 10);
-				}
-				if (match[5] === '.') {
-					second += parseFloat(match[3]);
-				} else {
-					second = parseInt(match[4], 10);
-					if (match[5] === ';' && frameRate > 0) {
-						second += parseInt(match[6], 10) / frameRate;
-					}
-				}
-				return (hour * 60 + minute) * 60 + second;
-			}
-		}
-
-		return NaN;
 	}
 
 	/*
