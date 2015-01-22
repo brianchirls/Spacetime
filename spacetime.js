@@ -10,6 +10,7 @@ module.exports = (function (window) {
 		eventEmitterize = require('./lib/event-emitterize'),
 		parseTimeCode = require('./lib/parse-timecode'),
 		forEach = require('lodash.foreach'),
+		binarySearch = require('binary-search'),
 		nop = function () {},
 
 	/*
@@ -314,6 +315,15 @@ module.exports = (function (window) {
 		}
 
 		this.start = parseTimeCode(options.start) || 0;
+		this.end = parseTimeCode(options.end);
+		/*
+		todo: what if start and/or end is negative?
+		todo: if/whenever duration changes, re-calculate this.end and tell parent to re-sort
+		*/
+
+		if (!isNaN(this.end)) {
+			this.end = Math.max(this.start, this.end);
+		}
 
 		//todo: is this audio, video or other?
 		reset(plugin.player);
@@ -491,20 +501,44 @@ module.exports = (function (window) {
 		//add or update a clip
 		//todo: allow batch loading of multiple clips
 		this.add = function (hook, options) {
+			var clip,
+				index;
 			/*
 			todo: smart loading to infer hook by cycling through all plugins,
 			running canPlaySrc on each one
 			*/
-			var clip = new Clip(this, plugins[hook], options);
+			clip = new Clip(this, plugins[hook], options);
 
 			/*
 			todo: keep a queue of clips that are missing start times and append them
 			once all clips before have been given a duration
 			*/
 
+			index = binarySearch(clipsByStart, clip, function (a, b) {
+				var diff = a.start - b.start ||
+					(a.end || a.start) - (b.end - b.start);
+
+				if (!diff) {
+					return a.id < b.id ? -1 : 1;
+				}
+
+				return diff;
+			});
+			clipsByStart.splice(index >= 0 ? index : ~index, 0, clip); // jshint ignore:line
+
+			index = binarySearch(clipsByEnd, clip, function (a, b) {
+				var diff = (a.end || a.start) - (b.end - b.start) ||
+					a.start - b.start;
+
+				if (!diff) {
+					return a.id < b.id ? -1 : 1;
+				}
+
+				return diff;
+			});
+			clipsByEnd.splice(index >= 0 ? index : ~index, 0, clip); // jshint ignore:line
+
 			clipsById[clip.id] = clip;
-			clipsByEnd.push(clip);
-			clipsByStart.push(clip);
 
 			/*
 			todo: sort clips by start time and by end time

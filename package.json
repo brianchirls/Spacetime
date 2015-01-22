@@ -17,10 +17,10 @@
   },
   "homepage": "https://github.com/brianchirls/Spacetime",
   "devDependencies": {
+    "binary-search": "^1.2.0",
     "jshint": "^2.6.0",
     "jshint-loader": "^0.8.1",
-    "webpack": "^1.5.3",
-
-    "lodash.foreach": "^2.4.1"
+    "lodash.foreach": "^2.4.1",
+    "webpack": "^1.5.3"
   }
 }

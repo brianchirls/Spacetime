@@ -21,15 +21,21 @@
 		var video;
 
 		function getPlayer(source) {
+			var i;
+
 			//todo: proper element type check, in case of iframes?
 			if (source instanceof HTMLVideoElement) {
 				video = source;
 			} else {
 				if (!video) {
 					video = document.createElement('video');
+				} else {
+					for (i = video.childNodes.length - 1; i >= 0; i--) {
+						video.removeChild(video.childNodes[i]);
+					}
 				}
 				if (typeof source === 'string') {
-					//todo: fill this in
+					video.src = source;
 				} else if (Array.isArray(source)) {
 					//todo: fill this in
 				} else if (source && typeof source === 'object') {
