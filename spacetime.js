@@ -1,22 +1,4 @@
-/*jslint devel: true, bitwise: true, browser: true, white: true, nomen: true, plusplus: true, maxerr: 50, indent: 4, todo: true */
-/*global define, module, exports */
-(function (root, factory) {
-	'use strict';
-
-	//todo: load Q as a dependency
-
-	if (typeof define === 'function' && define.amd) {
-		// AMD. Register as an anonymous module.
-		define('spacetime', function () {
-			return factory(root);
-		});
-	} else if (typeof exports === 'object') {
-		module.exports = factory(root);
-	} else if (typeof root.Spacetime !== 'function') {
-		// Browser globals
-		root.Spacetime = factory(root);
-	}
-}(this, function (window, undefined) {
+module.exports = (function (window, undefined) {
 	'use strict';
 
 	var document = window.document,
@@ -1187,4 +1169,4 @@
 	});
 
 	return Spacetime;
-}));
+}(this));

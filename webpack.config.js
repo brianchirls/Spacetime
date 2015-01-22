@@ -3,7 +3,9 @@ module.exports = {
     entry: "./spacetime.js",
     output: {
         path: __dirname + '/build/',
-        filename: "spacetime.js"
+        filename: "spacetime.js",
+        library: 'Spacetime',
+        libraryTarget: 'umd'
     },
     resolve: {
         modulesDirectories: ["web_modules", "node_modules", "bower_components"]
