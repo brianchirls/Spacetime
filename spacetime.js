@@ -516,7 +516,7 @@ module.exports = (function (window) {
 
 			index = binarySearch(clipsByStart, clip, function (a, b) {
 				var diff = a.start - b.start ||
-					(a.end || a.start) - (b.end - b.start);
+					(a.end || a.start) - (b.end || b.start);
 
 				if (!diff) {
 					return a.id < b.id ? -1 : 1;
@@ -527,7 +527,7 @@ module.exports = (function (window) {
 			clipsByStart.splice(index >= 0 ? index : ~index, 0, clip); // jshint ignore:line
 
 			index = binarySearch(clipsByEnd, clip, function (a, b) {
-				var diff = (a.end || a.start) - (b.end - b.start) ||
+				var diff = (a.end || a.start) - (b.end || b.start) ||
 					a.start - b.start;
 
 				if (!diff) {
@@ -539,11 +539,6 @@ module.exports = (function (window) {
 			clipsByEnd.splice(index >= 0 ? index : ~index, 0, clip); // jshint ignore:line
 
 			clipsById[clip.id] = clip;
-
-			/*
-			todo: sort clips by start time and by end time
-			or do a binary search/insertion
-			*/
 
 			/*
 			todo: add listener to clip for when it changes and re-sort if
