@@ -9,57 +9,57 @@ module.exports = (function (window) {
 		Global "environment" variables
 	*/
 
-	maxGlobalId = Date.now(), //todo: come up with something better than this
-	nop = function () {},
-	plugins = {},
-	compositors = {},
-	allClipsByType = {},
+		maxGlobalId = Date.now(), //todo: come up with something better than this
+		nop = function () {},
+		plugins = {},
+		compositors = {},
+		allClipsByType = {},
 
 	/*
 		Global reference variables
 	*/
 
-	readOnlyProperties = [
-		'duration',
-		'ended',
-		'error',
-		'networkState',
-		'paused',
-		'readyState',
-		'seeking',
-		'videoHeight',
-		'videoWidth'
-	],
+		readOnlyProperties = [
+			'duration',
+			'ended',
+			'error',
+			'networkState',
+			'paused',
+			'readyState',
+			'seeking',
+			'videoHeight',
+			'videoWidth'
+		],
 
 	// boolean value represents whether this is a writeable property
-	clipPlayerMethods = {
-		play: false,
-		pause: false,
-		//src: true, should just use modify, since this always needs to handle an existing player
-		currentTime: true,
-		load: false,
-		duration: false,
-		playbackRate: true,
-		width: true,
-		height: true,
-		videoWidth: false,
-		videoHeight: false,
-		volume: true,
-		muted: true,
-		//draw: false,?
-		//loop: true, this will probably be managed by Spacetime
-		destroy: false
-	},
+		clipPlayerMethods = {
+			play: false,
+			pause: false,
+			//src: true, should just use modify, since this always needs to handle an existing player
+			currentTime: true,
+			load: false,
+			duration: false,
+			playbackRate: true,
+			width: true,
+			height: true,
+			videoWidth: false,
+			videoHeight: false,
+			volume: true,
+			muted: true,
+			//draw: false,?
+			//loop: true, this will probably be managed by Spacetime
+			destroy: false
+		},
 
-	timeCodeRegex = /^(?:(?:([0-9]+):)?(?:([0-9]+):))?(([0-9]+)(?:([.;])([0-9]+)))?$/,
+		timeCodeRegex = /^(?:(?:([0-9]+):)?(?:([0-9]+):))?(([0-9]+)(?:([.;])([0-9]+)))?$/,
 
 	/*
 	todo: shims and API status
 	- web audio API
 	*/
-	requestAnimationFrame = require('./lib/raf').requestAnimationFrame,
-	cancelAnimationFrame = require('./lib/raf').cancelAnimationFrame,
-	now;
+		requestAnimationFrame = require('./lib/raf').requestAnimationFrame,
+		cancelAnimationFrame = require('./lib/raf').cancelAnimationFrame,
+		now;
 
 	/*
 		utility functions
