@@ -62,7 +62,9 @@ module.exports = (function (window) {
 	*/
 		requestAnimationFrame = require('./lib/raf').requestAnimationFrame,
 		cancelAnimationFrame = require('./lib/raf').cancelAnimationFrame,
-		now;
+		now = window.performance && window.performance.now ?
+			window.performance.now.bind(window.performance) :
+			Date.now.bind(Date);
 
 	/*
 		utility functions
@@ -906,15 +908,6 @@ module.exports = (function (window) {
 	};
 
 	/*
-	set up shims
-	*/
-	if (window.performance && window.performance.now) {
-		now = window.performance.now.bind(window.performance);
-	} else {
-		now = Date.now.bind(Date);
-	}
-
-	/*
 	Utilities
 	*/
 	Spacetime.util = Spacetime.prototype.util = {
@@ -996,4 +989,4 @@ module.exports = (function (window) {
 	});
 
 	return Spacetime;
-}(this));
+}(global));
