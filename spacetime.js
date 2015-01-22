@@ -566,23 +566,39 @@ module.exports = (function (window) {
 
 				forEach(compositors, function (compositor) {
 					//todo: make sure it supports this type of clip
-					if (compositor && compositor.add) {
+					if (compositor && compositor.remove) {
 						compositor.remove.call(spacetime, clip);
 					}
 				});
 
-				/*
-				if we find we're using lots and lots of clips,
-				it may be faster to binary search based on start/end times
-				*/
-				i = clipsByStart.indexOf(clip);
+				i = binarySearch(clipsByStart, clip, function (a, b) {
+					var diff = a.start - b.start ||
+						(a.end || a.start) - (b.end || b.start);
+
+					if (!diff) {
+						return a.id < b.id ? -1 : a !== b ? 1 : 0;
+					}
+
+					return diff;
+				});
 				if (i >= 0) {
 					clipsByStart.splice(i, 1);
 				}
-				i = clipsByEnd.indexOf(clip);
+
+				i = binarySearch(clipsByEnd, clip, function (a, b) {
+					var diff = (a.end || a.start) - (b.end || b.start) ||
+						a.start - b.start;
+
+					if (!diff) {
+						return a.id < b.id ? -1 : a !== b ? 1 : 0;
+					}
+
+					return diff;
+				});
 				if (i >= 0) {
 					clipsByEnd.splice(i, 1);
 				}
+
 				delete clipsById[clipId];
 				//todo: destroy the clip?
 			}
