@@ -11,8 +11,15 @@ module.exports = {
         preLoaders: [
             {
                 test: /\.js$/,
-                exclude: /node_modules/,
+                exclude: /node_modules|bower_components/,
                 loader: 'jshint-loader'
+            }
+        ],
+        loaders: [
+            {
+                test:    /\.js$/,
+                exclude: /node_modules|bower_components/,
+                loader: 'jscs-loader'
             }
         ]
     },
@@ -54,5 +61,16 @@ module.exports = {
 
         failOnHint: true,
         emitErrors: true,
+    },
+
+    jscs: {
+        emitErrors: true,
+        failOnHint: true,
+
+        preset: 'crockford',
+        validateIndentation: '\t',
+        validateLineBreaks: 'LF',
+        requireLineFeedAtFileEnd: null,
+        validateQuoteMarks: '\''
     }
 };

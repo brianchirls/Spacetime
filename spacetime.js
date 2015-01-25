@@ -262,9 +262,11 @@ module.exports = (function (window) {
 			playerState.currentTime = currentTime;
 
 			//todo: go through all clips that need to be updated, started or stopped
+			/*
 			if (forward) {
 			} else {
 			}
+			*/
 
 			//todo: if any one clip's currentTime is too far off expected value, fire 'waiting'
 			//todo: if timeController is no longer active, select a new one
@@ -1240,9 +1242,9 @@ module.exports = (function (window) {
 		/*todo:
 		- meta object should include canPlayType (and canPlaySrc?) method/regex
 		- meta object should have a list of track types supported and whether each is required, e.g.:
-		  - 'video' supports video, audio (neither required)
-		  - 'text' supports video, required
-		  - 'audio' supports audio, required
+			- 'video' supports video, audio (neither required)
+			- 'text' supports video, required
+			- 'audio' supports audio, required
 		*/
 
 		type = extend({}, meta);
