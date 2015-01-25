@@ -472,7 +472,7 @@ module.exports = (function (window) {
 
 			//todo: if any one clip's currentTime is too far off expected value, fire 'waiting'
 			//todo: if timeController is no longer active, select a new one
-			//todo: tell clips which ones need to be loaded
+			//todo: tell clips which ones need to be loaded or abort loading
 
 			//todo: maybe throttle this? could be an option
 			spacetime.emit('timeupdate');
@@ -728,9 +728,16 @@ module.exports = (function (window) {
 		});
 
 		/*
+		todo: allow setting of duration
+		if duration is less than existing clips:
+		- if currentTime > duration: pause, currentTime = duration
+		- keep all clips but force them to abort loading after duration
+		*/
+
+		/*
 		todo: more writeable properties
 		- loop
-		- width
+		- width - w, h should be "custom" properties defined by compositor
 		- height
 		- src (runs this.clip)
 		- autoplay
