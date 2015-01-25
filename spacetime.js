@@ -346,16 +346,8 @@ module.exports = (function (window) {
 			*/
 		}
 
-		function loadClip(id, plugin, options) {
-			var id,
-				clip;
-
-			options = extend({}, options);
-			options.id = id;
-
-			clip = new Clip(plugin, options);
-
-			clipsById[id] = clip;
+		function loadClip(clip) {
+			clipsById[clip.id] = clip;
 			/*
 			todo:
 			make a lookup of clips by 'name' option and make that searchable later
@@ -409,6 +401,9 @@ module.exports = (function (window) {
 
 				start,
 				end,
+
+				from = 0,
+				to = Infinity,
 
 				minTime = 0,
 				maxTime = Infinity;
@@ -506,21 +501,7 @@ module.exports = (function (window) {
 						todo: replace this whole thing with splice
 						if resulting clip length is 0, remove it
 						*/
-						if (clip.end() < Infinity && end < Infinity &&
-								clip.end() <= end && clip.start() >= start) {
-
-							//new clip entirely obliterates old clip
-							spacetime.remove(clip);
-						} else if (clip.end() < Infinity && end < Infinity &&
-								clip.end() > end && clip.start() > start) {
-
-							//break clip into two pieces and splice out the middle
-							clip.splice(start, end);
-						} else if (clip.start() < start) {
-							clip.trim(start);
-						} else {
-							clip.trim(0, end);
-						}
+						clip.splice(self.start(), self.end());
 					}
 				} else if (layersOrder.length) {
 					clip = findFirst(layersOrder[layersOrder.length - 1].clips, overlaps);
@@ -605,19 +586,6 @@ module.exports = (function (window) {
 				}
 			};
 
-			/*
-			todo: export publicly accessible object with fewer methods
-			public methods:
-			- isActive
-			- modify
-			- remove (from parent)
-			- id
-			- event handling (on/off)
-			- get parent object
-			- get container?
-			- get special values, provided by definition
-			*/
-
 			this.play = function () {
 				//todo: update play/playing state
 				if (playerMethods.play) {
@@ -681,11 +649,6 @@ module.exports = (function (window) {
 			Time editing methods:
 			*/
 
-			/*
-			todo: what if start and/or end is negative?
-			todo: if/whenever duration changes, re-calculate this.end and tell parent to re-sort
-			*/
-
 			this.start = function (val) {
 				var time,
 					oldStart = start;
@@ -739,9 +702,38 @@ module.exports = (function (window) {
 				return end;
 			};
 
+			/*
+			todo: what if to < from?
+			*/
+			this.from = function (val) {
+				if (val !== undefined && !isNaN(val)) {
+					from = Math.max(0, val);
+					if (!isNaN(self.metadata.duration)) {
+						from = Math.min(self.metadata.duration, from);
+					}
+
+					//todo: seek to current position, pause or loop if outside range
+					//todo: come up with an event to fire if this value changed
+				}
+
+				return from;
+			};
+
+			this.to = function (val) {
+				if (val !== undefined && !isNaN(val)) {
+					to = Math.max(0, val);
+					//for now, we're not gonna enforce an upper limit on 'to'
+
+					//todo: seek to current position, pause or loop if outside range
+					//todo: come up with an event to fire if this value changed
+				}
+
+				return to;
+			};
+
 			this.trim = function (min, max) {
 				var oldStart = start,
-					oldEnd = oldEnd,
+					oldEnd = end,
 					change = false;
 
 				if (isNaN(min)) {
@@ -764,19 +756,46 @@ module.exports = (function (window) {
 					end = Math.max(start, Math.min(end, maxTime));
 					change = end !== oldEnd;
 				}
+				from += oldStart - start;
+
 				change = change || start !== oldStart;
-
-				//todo: adjust from/to
-
 				if (change) {
 					self.emit('timechange', self);
 				}
 			};
 
-			//todo: splice clip into two
 			this.splice = function (min, max) {
+				var newClip;
 				if (isNaN(max) || max < min) {
 					max = min;
+				}
+
+				//todo: this whole mess could probably be made more efficient
+				if (self.end() < Infinity && max < Infinity &&
+						self.end() <= max && self.start() >= min) {
+
+					//entire clip range is removed
+					spacetime.remove(self.id);
+				} else if (self.end() < Infinity && max < Infinity &&
+						self.end() > max && self.start() < min) {
+
+					//break clip into two pieces and splice out the middle
+					newClip = self.clone();
+					newClip.trim(max);
+					self.trim(0, min);
+
+					//add new clip to the same layer
+					newClip.layer = self.layer;
+					self.layer.add(newClip);
+
+					//add new clip to the rest of the composition
+					loadClip(newClip);
+				} else if (self.start() < min) {
+					//chop off end of clip
+					self.trim(min);
+				} else {
+					//chop off start of clip
+					self.trim(0, max);
 				}
 
 				/*
@@ -793,6 +812,26 @@ module.exports = (function (window) {
 				//todo: don't forget to emit timechange if necessary
 			};
 
+			/*
+			Note: clone is for internal use only and does not add new clip to timeline anywhere
+			*/
+			this.clone = function () {
+				var opts = extend({}, options),
+					newClip;
+
+				extend(opts, {
+					id: guid('spacetime'),
+					start: start,
+					end: end,
+					from: from,
+					to: to,
+					layer: null
+				});
+
+				newClip = new Clip(plugin, opts);
+				return newClip;
+			};
+
 			this.reset = reset;
 
 			this.metadata = {
@@ -807,12 +846,27 @@ module.exports = (function (window) {
 				plugin = extend(plugin, plugin.definition.call(this, options));
 			}
 
-			addToLayer(options.layer);
+			if (options.layer !== null) {
+				addToLayer(options.layer);
+			}
 
 			//todo: is this audio, video or other?
 			reset(plugin.player);
 
 			initialized = true;
+
+			/*
+			todo: export publicly accessible object with fewer methods
+			public methods:
+			- isActive
+			- modify
+			- remove (from parent)
+			- id
+			- event handling (on/off)
+			- get parent object
+			- get container?
+			- get special values, provided by definition
+			*/
 		};
 
 		Layer = function (options) {
@@ -908,17 +962,13 @@ module.exports = (function (window) {
 			if no plugin found, throw error
 			*/
 
-			/*
-			todo: keep a queue of clips that are missing start times and append them
-			once all clips before have been given a duration.
-			Need to figure out what happens if clip with times is loaded async
-			in between two clips without times.
-			And what if an earlier clip is removed before the next clip becomes eligible?
-			**This will probably never happen - may leave it up to outside code to
-			**determine duration before adding clips
-			*/
+			options = extend({}, options);
+			options.id = id;
+			if (options.layer === null) {
+				options.layer = undefined;
+			}
 
-			loadClip(id, plugins[hook], options);
+			loadClip(new Clip(plugins[hook], options));
 
 			return spacetime;
 		};
