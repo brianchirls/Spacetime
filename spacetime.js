@@ -346,36 +346,10 @@ module.exports = (function (window) {
 
 		function loadClip(id, plugin, options) {
 			var id,
-				clip,
-				layer,
-				layerId;
+				clip;
 
 			options = extend({}, options);
 			options.id = id;
-
-			/*
-			todo: if Layer gets moved inside Spacetime, move all this logic
-			into Clip object
-			*/
-			layerId = options.layer;
-			if (typeof layerId === 'number') {
-				if (layerId >= 0 && layersOrder[layerId]) {
-					layer = layersOrder[layerId];
-				}
-			} else if (typeof layerId === 'string' && layerId) {
-				layer = layersById[layerId];
-			}
-
-			/*
-			todo: if layer is specified and clip overlaps with existing clip on same layer,
-			trim existing clip for that period of time
-			*/
-			if (!layer) {
-				layerId = guid('spacetime');
-				spacetime.addLayer(layerId);
-				layer = layersById[layerId];
-			}
-			options.layer = layer;
 
 			clip = new Clip(plugin, options);
 
@@ -384,8 +358,6 @@ module.exports = (function (window) {
 			todo:
 			make a lookup of clips by 'name' option and make that searchable later
 			*/
-
-			layer.add(clip);
 
 			/*
 			add listener to clip for when it changes and re-sort if
@@ -493,6 +465,74 @@ module.exports = (function (window) {
 				- fire emptied, abort, whatever necessary events
 				*/
 				self.metadata.duration = NaN;
+			}
+
+			function addToLayer(layerId) {
+
+				function overlaps(clip) {
+					return clip.start() < (end || Infinity) && clip.end() > start;
+				}
+
+				var layerId,
+					layer,
+					clip;
+
+				layerId = options.layer;
+				if (typeof layerId === 'number') {
+					if (layerId >= 0 && layersOrder[layerId]) {
+						layer = layersOrder[layerId];
+					}
+				} else if (typeof layerId === 'string' && layerId) {
+					layer = layersById[layerId];
+					if (!layer) {
+						spacetime.addLayer(layerId);
+						layer = layersById[layerId];
+					}
+				}
+
+				/*
+				If layer is specified and clip overlaps with existing clip on same layer,
+				trim existing clip for that period of time
+
+				Otherwise, if top layer has room for new clip, use top layer,
+				else add new layer
+				*/
+				if (layer) {
+					clip = findFirst(layer.clips, overlaps);
+					if (clip) {
+						/*
+						todo: replace this whole thing with splice
+						if resulting clip length is 0, remove it
+						*/
+						if (clip.end() < Infinity && end < Infinity &&
+								clip.end() <= end && clip.start() >= start) {
+
+							//new clip entirely obliterates old clip
+							spacetime.remove(clip);
+						} else if (clip.end() < Infinity && end < Infinity &&
+								clip.end() > end && clip.start() > start) {
+
+							//break clip into two pieces and splice out the middle
+							clip.splice(start, end);
+						} else if (clip.start() < start) {
+							clip.trim(start);
+						} else {
+							clip.trim(0, end);
+						}
+					}
+				} else if (layersOrder.length) {
+					clip = findFirst(layersOrder[layersOrder.length - 1].clips, overlaps);
+					if (!clip) {
+						layer = layersOrder[layersOrder.length - 1];
+					}
+				}
+				if (!layer) {
+					layerId = guid('spacetime');
+					spacetime.addLayer(layerId);
+					layer = layersById[layerId];
+				}
+				layer.add(self);
+				self.layer = layer;
 			}
 
 			this.active = false;
@@ -731,6 +771,19 @@ module.exports = (function (window) {
 				}
 			};
 
+			//todo: splice clip into two
+			this.splice = function (min, max) {
+				if (isNaN(max) || max < min) {
+					max = min;
+				}
+
+				/*
+				todo: if length of new clip is 0,
+				start = end = Math.min(start, min)
+				log warning if called from outside
+				*/
+			};
+
 			this.shift = function (delta) {
 				var s, e;
 				s = start;
@@ -751,6 +804,8 @@ module.exports = (function (window) {
 			if (plugin.definition) {
 				plugin = extend(plugin, plugin.definition.call(this, options));
 			}
+
+			addToLayer(options.layer);
 
 			//todo: is this audio, video or other?
 			reset(plugin.player);
