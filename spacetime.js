@@ -23,6 +23,7 @@ module.exports = (function (window) {
 		plugins = {},
 		compositorPlugins = {},
 		allClipsByType = {},
+		minClipLength = 1 / 16,
 
 	/*
 		Global reference variables
@@ -90,9 +91,28 @@ module.exports = (function (window) {
 		Constructors
 	*/
 
-	function Clip(parent, id, plugin, options) {
+	function Clip(parent, plugin, options) {
+		/*
+		todo: consider allowing start time to be negative
+		- can be shifted around later without losing data
+		- ignore playback for anything before 0
+		- do not load anything before 0
+		*/
+		/*
+		todo: add from/to, internal clip times
+		- accessor methods. internal shift?
+		- how are they affected by trim?
+		*/
 		var that = this,
-			playerMethods = {};
+			id = options.id,
+			initialized = false,
+			playerMethods = {},
+
+			start,
+			end,
+
+			minTime = 0,
+			maxTime = Infinity;
 
 		function reset(player) {
 			//todo: do we need more parameters?
@@ -183,7 +203,7 @@ module.exports = (function (window) {
 				metadata = that.metadata,
 				changed = false,
 				durationchange = false,
-				end;
+				oldEnd = end;
 
 			//todo: make sure duration is not negative or Infinity
 			duration = values.duration;
@@ -200,24 +220,23 @@ module.exports = (function (window) {
 					changed = true;
 				}
 			}
-			if (changed) {
-				that.emit('loadedmetadata', that, metadata);
 
+			if (changed) {
 				if (durationchange) {
 					if (isNaN(duration)) {
-						end = that.start;
-					} else {
-						end = parseTimeCode(options.end);
-						if (isNaN(end)) {
-							end = that.start + duration;
-						}
+						duration = minClipLength;
 					}
-					end = Math.max(that.start, end);
-					if (end !== that.end) {
-						that.end = end;
-						that.emit('timechange', that, duration);
+					if (isNaN(end)) {
+						end = Infinity;
+					}
+					end = Math.min(end, Math.min(maxTime, start + duration));
+
+					if (initialized && oldEnd !== end && !(isNaN(end) && isNaN(oldEnd))) {
+						that.emit('timechange', that);
 					}
 				}
+
+				that.emit('loadedmetadata', that, metadata);
 			}
 		};
 
@@ -284,32 +303,124 @@ module.exports = (function (window) {
 			*/
 		};
 
-		this.reset = reset;
+		/*
+		Time editing methods:
+		*/
 
-		options = extend({}, options);
-		plugin = extend({}, plugin);
-		if (plugin.definition) {
-			plugin = extend(plugin, plugin.definition.call(this, options));
-		}
-
-		this.metadata = {
-			duration: NaN
-		};
-
-		//todo: make these into setters or methods so they trigger "timechange" event
-		this.start = parseTimeCode(options.start) || 0;
-		this.end = parseTimeCode(options.end);
 		/*
 		todo: what if start and/or end is negative?
 		todo: if/whenever duration changes, re-calculate this.end and tell parent to re-sort
 		*/
 
-		if (!isNaN(this.end)) {
-			this.end = Math.max(this.start, this.end);
+		this.start = function (val) {
+			var time,
+				oldStart = start;
+
+			if (val !== undefined) {
+				time = parseTimeCode(val);
+				if (isNaN(time)) {
+					throw new Error('Clip.start - Unknown time value ' + time);
+				}
+
+				start = Math.max(0, time);
+				if (!isNaN(end)) {
+					end = Math.max(start + minClipLength, end);
+					maxTime = Math.max(maxTime, end);
+					//todo: adjust clip duration
+				}
+
+				minTime = Math.max(0, Math.min(minTime, start));
+
+				if (initialized && start !== oldStart) {
+					that.emit('timechange', that);
+				}
+			}
+
+			return start;
+		};
+
+		this.end = function (val) {
+			var oldEnd = end,
+				time;
+
+			if (val !== undefined) {
+				time = parseTimeCode(val);
+				if (isNaN(time)) {
+					throw new Error('Clip.start - Unknown time value ' + time);
+				}
+
+				end = time;
+				maxTime = Math.max(maxTime, end);
+				start = Math.min(start, end - minClipLength);
+				minTime = Math.max(0, Math.min(minTime, start));
+
+				if (initialized && oldEnd !== end && !(isNaN(end) && isNaN(oldEnd))) {
+					that.emit('timechange', that);
+				}
+			}
+
+			return end;
+		};
+
+		this.trim = function (min, max) {
+			var oldStart = start,
+				oldEnd = oldEnd,
+				change = false;
+
+			if (isNaN(min)) {
+				min = 0;
+			}
+
+			if (isNaN(max)) {
+				max = Infinity;
+			}
+
+			if (max <= min) {
+				throw new Error('Clip.trim: max must be greater than min');
+			}
+
+			minTime = Math.max(min, minTime);
+			maxTime = Math.min(max, maxTime);
+
+			start = Math.max(start, minTime);
+			if (!isNaN(end)) {
+				end = Math.max(start, Math.min(end, maxTime));
+				change = end !== oldEnd;
+			}
+			change = change || start !== oldStart;
+
+			//todo: adjust from/to
+
+			if (change) {
+				that.emit('timechange', that);
+			}
+		};
+
+		this.shift = function (delta) {
+			var s, e;
+			s = start;
+			//todo: fill this in
+			//todo: don't forget to emit timechange if necessary
+		};
+
+		this.reset = reset;
+
+		this.metadata = {
+			duration: NaN
+		};
+
+		this.start(options.start || 0);
+		this.end(options.end);
+
+		plugin = extend({}, plugin);
+		if (plugin.definition) {
+			plugin = extend(plugin, plugin.definition.call(this, options));
 		}
 
 		//todo: is this audio, video or other?
 		reset(plugin.player);
+
+		initialized = true;
 	}
 
 	function Spacetime(opts) {
@@ -373,28 +484,42 @@ module.exports = (function (window) {
 			clipsByEnd = [],
 			clipsById = {},
 			activeClips = {},
+
+			layersById = {},
+			layersOrder = [],
+
 			startIndex = -1,
 			endIndex = -1,
 
 			id;
 
 		function compareClipsByStart(a, b) {
-			var diff = a.start - b.start ||
-				(a.end || a.start) - (b.end || b.start);
+			var diff;
+
+			if (a === b) {
+				return 0;
+			}
+
+			diff = a.start() - b.start() ||
+				(a.end() || a.start()) - (b.end() || b.start());
 
 			if (!diff) {
-				return a.id < b.id ? -1 : a !== b ? 1 : 0;
+				return a.id < b.id ? -1 : 1;
 			}
 
 			return diff;
 		}
 
 		function compareClipsByEnd(a, b) {
-			var diff = (a.end || a.start) - (b.end || b.start) ||
-				a.start - b.start;
+			var diff;
+			if (a === b) {
+				return 0;
+			}
+			diff = (a.end() || a.start()) - (b.end() || b.start()) ||
+				a.start() - b.start();
 
 			if (!diff) {
-				return a.id < b.id ? -1 : a !== b ? 1 : 0;
+				return a.id < b.id ? -1 : 1;
 			}
 
 			return diff;
@@ -552,9 +677,22 @@ module.exports = (function (window) {
 			var id,
 				clip;
 
-			clip = new Clip(that, id, plugin, options);
+			options = extend({}, options);
+			options.id = id;
 
-			clipsById[clip.id] = clip;
+			/*
+			todo: determine which layer to place clip on
+			if clip overlaps with existing clip on same layer,
+			replace it for that period of time
+			*/
+
+			clip = new Clip(that, plugin, options);
+
+			clipsById[id] = clip;
+			/*
+			todo:
+			make a lookup of clips by 'name' option and make that searchable later
+			*/
 
 			/*
 			add listener to clip for when it changes and re-sort if
@@ -620,9 +758,11 @@ module.exports = (function (window) {
 			Need to figure out what happens if clip with times is loaded async
 			in between two clips without times.
 			And what if an earlier clip is removed before the next clip becomes eligible?
+			**This will probably never happen - may leave it up to outside code to
+			**determine duration before adding clips
 			*/
 
-			loadClip(plugins[hook], options);
+			loadClip(id, plugins[hook], options);
 		};
 
 		//remove a clip
