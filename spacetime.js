@@ -119,412 +119,16 @@ module.exports = (function (window) {
 		return diff;
 	}
 
-	/*
-		Constructors
-		todo:
-			If we don't want to allow clips and layers to be transferred
-			from one composition to another, move constructors inside Spacetime.
-
-			Maybe allow a composition to clone an alien clip by making the properties
-			on the public clip object match the options parameter for Spacetime.add
-	*/
-
-	function Clip(parent, plugin, options) {
-		/*
-		todo: consider allowing start time to be negative
-		- can be shifted around later without losing data
-		- ignore playback for anything before 0
-		- do not load anything before 0
-		*/
-		/*
-		todo: add from/to, internal clip times
-		- accessor methods. internal shift?
-		- how are they affected by trim?
-		*/
-		var that = this,
-			id = options.id,
-			initialized = false,
-			playerMethods = {},
-
-			start,
-			end,
-
-			minTime = 0,
-			maxTime = Infinity;
-
-		function reset(player) {
-			//todo: do we need more parameters?
-
-			function setUpProperty(methodName, writeable) {
-				var method = plugin[methodName] || methodName;
-
-				if (typeof method === 'string') {
-					if (player) {
-						method = player[method];
-						if (typeof method === 'function') {
-							playerMethods[methodName] = method.bind(player);
-						} else if (writeable) {
-							playerMethods[methodName] = function (value) {
-								if (value !== undefined) {
-									player[methodName] = value;
-								}
-								return player[methodName];
-							};
-						} else {
-							playerMethods[methodName] = function () {
-								return player[methodName];
-							};
-						}
-					}
-				} else if (typeof method === 'function') {
-					playerMethods[methodName] = method.bind(that);
-				}
-			}
-
-			var key;
-
-			player = typeof player === 'object' && player;
-			for (key in clipPlayerMethods) {
-				if (hasOwn(clipPlayerMethods, key)) {
-					delete playerMethods[key];
-					setUpProperty(key, clipPlayerMethods[key]);
-				}
-			}
-
-			//todo: what about a method for getting buffered sections?
-
-			/*
-			todo: if cannot play currently set source object, fire error
-			- name: "MediaError",
-			- message: "Media Source Not Supported",
-			- code: MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
-			*/
-
-			/*
-			todo:
-			- reset readyState, networkState
-			- fire emptied, abort, whatever necessary events
-			*/
-			that.metadata.duration = NaN;
-		}
-
-		this.parent = parent;
-		this.active = false;
-		this.id = id;
-		this.startIndex = -1;
-		this.endIndex = -1;
-
-		eventEmitterize(this);
-
-		//this.playbackRate = 1;
-
-		/*
-		todo methods:
-		- setCurrentTime
-		- getCurrentTime
-		- play
-		- pause
-		- destroy (calls pause)
-		- modify
-		- load(start, end). load(0, 0) means just metadata
-		- set/get playback rate
-		- get/set general properties
-		- some way to access the compositable element(s) and/or data
-		- compatible
-		- report buffered, seekable ranges
-		*/
-
-		this.loadMetadata = function (values) {
-			var k,
-				duration,
-				metadata = that.metadata,
-				changed = false,
-				durationchange = false,
-				oldEnd = end;
-
-			//todo: make sure duration is not negative or Infinity
-			duration = values.duration;
-			if (isNaN(duration)) {
-				duration = metadata.duration;
-			} else if (metadata.duration !== duration) {
-				metadata.duration = duration || NaN;
-				durationchange = true;
-			}
-
-			for (k in values) {
-				if (values.hasOwnProperty(k) && metadata[k] !== values[k]) {
-					metadata[k] = values[k];
-					changed = true;
-				}
-			}
-
-			if (changed) {
-				if (durationchange) {
-					if (isNaN(duration)) {
-						duration = minClipLength;
-					}
-					if (isNaN(end)) {
-						end = Infinity;
-					}
-					end = Math.min(end, Math.min(maxTime, start + duration));
-
-					if (initialized && oldEnd !== end && !(isNaN(end) && isNaN(oldEnd))) {
-						that.emit('timechange', that);
-					}
-				}
-
-				that.emit('loadedmetadata', that, metadata);
-			}
-		};
-
-		/*
-		todo: export publicly accessible object with fewer methods
-		public methods:
-		- isActive
-		- modify
-		- remove (from parent)
-		- id
-		- event handling (on/off)
-		- get parent object
-		- get container?
-		- get special values, provided by definition
-		*/
-
-		this.play = function () {
-			//todo: update play/playing state
-			if (playerMethods.play) {
-				playerMethods.play();
-			}
-		};
-
-		this.pause = function () {
-			//todo: update play/playing state
-			if (playerMethods.pause) {
-				playerMethods.pause();
-			}
-		};
-
-		this.activate = function () {
-			if (!this.active) {
-				this.active = true;
-
-				if (playerMethods.activate) {
-					playerMethods.activate();
-				}
-				//todo: seek to appropriate place based on parent's currentTime
-				//todo: if parent is playing, try to play
-				//that.play();
-				that.emit('activate', that);
-			}
-		};
-
-		this.deactivate = function () {
-			if (this.active) {
-				this.active = false;
-
-				if (playerMethods.deactivate) {
-					playerMethods.deactivate();
-				}
-				that.pause();
-				that.emit('deactivate', that);
-			}
-		};
-
-		this.destroy = function () {
-			that.deactivate();
-
-			parent.remove(id);
-
-			that.removeAllListeners();
-			//todo: clean up
-		};
-
-		this.src = function (src) {
-			/*
-			todo: we need a callback function that checks if the old source and new source have changed
-			- only reset if it has changed
-			- otherwise we can update it and call modify but don't need to reset
-			- e.g. src on video needs reset; new text for a text effect does not
-			- anything that makes buffered go backwards should cause a reset (or change duration?)
-			*/
-		};
-
-		/*
-		Time editing methods:
-		*/
-
-		/*
-		todo: what if start and/or end is negative?
-		todo: if/whenever duration changes, re-calculate this.end and tell parent to re-sort
-		*/
-
-		this.start = function (val) {
-			var time,
-				oldStart = start;
-
-			if (val !== undefined) {
-				time = parseTimeCode(val);
-				if (isNaN(time)) {
-					throw new Error('Clip.start - Unknown time value ' + time);
-				}
-
-				start = Math.max(0, time);
-				if (!isNaN(end)) {
-					end = Math.max(start + minClipLength, end);
-					maxTime = Math.max(maxTime, end);
-					//todo: adjust clip duration
-				}
-
-				minTime = Math.max(0, Math.min(minTime, start));
-
-				if (initialized && start !== oldStart) {
-					that.emit('timechange', that);
-				}
-			}
-
-			return start;
-		};
-
-		this.end = function (val) {
-			var oldEnd = end,
-				time;
-
-			if (val !== undefined) {
-				time = parseTimeCode(val);
-				if (isNaN(time)) {
-					throw new Error('Clip.start - Unknown time value ' + time);
-				}
-
-				end = time;
-				maxTime = Math.max(maxTime, end);
-				start = Math.min(start, end - minClipLength);
-				minTime = Math.max(0, Math.min(minTime, start));
-
-				if (initialized && oldEnd !== end && !(isNaN(end) && isNaN(oldEnd))) {
-					that.emit('timechange', that);
-				}
-			}
-
-			if (end === undefined) {
-				return Infinity;
-			}
-			return end;
-		};
-
-		this.trim = function (min, max) {
-			var oldStart = start,
-				oldEnd = oldEnd,
-				change = false;
-
-			if (isNaN(min)) {
-				min = 0;
-			}
-
-			if (isNaN(max)) {
-				max = Infinity;
-			}
-
-			if (max <= min) {
-				throw new Error('Clip.trim: max must be greater than min');
-			}
-
-			minTime = Math.max(min, minTime);
-			maxTime = Math.min(max, maxTime);
-
-			start = Math.max(start, minTime);
-			if (!isNaN(end)) {
-				end = Math.max(start, Math.min(end, maxTime));
-				change = end !== oldEnd;
-			}
-			change = change || start !== oldStart;
-
-			//todo: adjust from/to
-
-			if (change) {
-				that.emit('timechange', that);
-			}
-		};
-
-		this.shift = function (delta) {
-			var s, e;
-			s = start;
-			//todo: fill this in
-			//todo: don't forget to emit timechange if necessary
-		};
-
-		this.reset = reset;
-
-		this.metadata = {
-			duration: NaN
-		};
-
-		this.start(options.start || 0);
-		this.end(options.end);
-
-		plugin = extend({}, plugin);
-		if (plugin.definition) {
-			plugin = extend(plugin, plugin.definition.call(this, options));
-		}
-
-		//todo: is this audio, video or other?
-		reset(plugin.player);
-
-		initialized = true;
-	}
-
-	function Layer(parent, options) {
-		var that = this;
-
-		function sortClips() {
-			that.clips.sort(compareClipsByStart);
-		}
-
-		this.options = options;
-		this.clips = [];
-
-		this.id = options.id;
-
-		this.add = function (clip) {
-			/*
-			For now, we assume there are no duplicates. It may become necessary to
-			scan for and remove any duplicates.
-			*/
-			clip.layer = that;
-			clip.on('timechange', sortClips);
-			that.clips.push(clip);
-			sortClips();
-		};
-
-		this.remove = function (clipId) {
-			var i, clip;
-
-			for (i = 0; i < that.clips.length; i++) {
-				clip = that.clips[i];
-				if (clip.id === clipId) {
-					clip.off('timechange', sortClips);
-					clip.layer = null;
-					that.clips.splice(i, 1);
-					return;
-				}
-			}
-		};
-
-		this.destroy = function () {
-			/*
-			todo: clean out any events or options created later
-			*/
-		};
-
-		//todo: make publicly accessible object, if necessary?
-	}
-
 	function Spacetime(opts) {
 		//initialize object, private properties
-		var that = this,
+		var spacetime = this,
 			options = opts || {},
 			spacetime = this,
 			isDestroyed = false,
 			compositors = {},
+
+			Clip,
+			Layer,
 
 			/*
 			todo: move most of the below stuff into an object that can be accessed by modules
@@ -768,12 +372,12 @@ module.exports = (function (window) {
 			*/
 			if (!layer) {
 				layerId = guid('spacetime');
-				that.addLayer(layerId);
+				spacetime.addLayer(layerId);
 				layer = layersById[layerId];
 			}
 			options.layer = layer;
 
-			clip = new Clip(that, plugin, options);
+			clip = new Clip(plugin, options);
 
 			clipsById[id] = clip;
 			/*
@@ -810,6 +414,397 @@ module.exports = (function (window) {
 		}
 
 		/*
+			Constructors
+		*/
+		Clip = function (plugin, options) {
+			/*
+			todo: consider allowing start time to be negative
+			- can be shifted around later without losing data
+			- ignore playback for anything before 0
+			- do not load anything before 0
+			*/
+			/*
+			todo: add from/to, internal clip times
+			- accessor methods. internal shift?
+			- how are they affected by trim?
+			*/
+			var self = this,
+				id = options.id,
+				initialized = false,
+				playerMethods = {},
+
+				start,
+				end,
+
+				minTime = 0,
+				maxTime = Infinity;
+
+			function reset(player) {
+				//todo: do we need more parameters?
+
+				function setUpProperty(methodName, writeable) {
+					var method = plugin[methodName] || methodName;
+
+					if (typeof method === 'string') {
+						if (player) {
+							method = player[method];
+							if (typeof method === 'function') {
+								playerMethods[methodName] = method.bind(player);
+							} else if (writeable) {
+								playerMethods[methodName] = function (value) {
+									if (value !== undefined) {
+										player[methodName] = value;
+									}
+									return player[methodName];
+								};
+							} else {
+								playerMethods[methodName] = function () {
+									return player[methodName];
+								};
+							}
+						}
+					} else if (typeof method === 'function') {
+						playerMethods[methodName] = method.bind(self);
+					}
+				}
+
+				var key;
+
+				player = typeof player === 'object' && player;
+				for (key in clipPlayerMethods) {
+					if (hasOwn(clipPlayerMethods, key)) {
+						delete playerMethods[key];
+						setUpProperty(key, clipPlayerMethods[key]);
+					}
+				}
+
+				//todo: what about a method for getting buffered sections?
+
+				/*
+				todo: if cannot play currently set source object, fire error
+				- name: "MediaError",
+				- message: "Media Source Not Supported",
+				- code: MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+				*/
+
+				/*
+				todo:
+				- reset readyState, networkState
+				- fire emptied, abort, whatever necessary events
+				*/
+				self.metadata.duration = NaN;
+			}
+
+			this.active = false;
+			this.id = id;
+			this.startIndex = -1;
+			this.endIndex = -1;
+
+			eventEmitterize(this);
+
+			//this.playbackRate = 1;
+
+			/*
+			todo methods:
+			- setCurrentTime
+			- getCurrentTime
+			- play
+			- pause
+			- destroy (calls pause)
+			- modify
+			- load(start, end). load(0, 0) means just metadata
+			- set/get playback rate
+			- get/set general properties
+			- some way to access the compositable element(s) and/or data
+			- compatible
+			- report buffered, seekable ranges
+			*/
+
+			this.loadMetadata = function (values) {
+				var k,
+					duration,
+					metadata = self.metadata,
+					changed = false,
+					durationchange = false,
+					oldEnd = end;
+
+				//todo: make sure duration is not negative or Infinity
+				duration = values.duration;
+				if (isNaN(duration)) {
+					duration = metadata.duration;
+				} else if (metadata.duration !== duration) {
+					metadata.duration = duration || NaN;
+					durationchange = true;
+				}
+
+				for (k in values) {
+					if (values.hasOwnProperty(k) && metadata[k] !== values[k]) {
+						metadata[k] = values[k];
+						changed = true;
+					}
+				}
+
+				if (changed) {
+					if (durationchange) {
+						if (isNaN(duration)) {
+							duration = minClipLength;
+						}
+						if (isNaN(end)) {
+							end = Infinity;
+						}
+						end = Math.min(end, Math.min(maxTime, start + duration));
+
+						if (initialized && oldEnd !== end && !(isNaN(end) && isNaN(oldEnd))) {
+							self.emit('timechange', self);
+						}
+					}
+
+					self.emit('loadedmetadata', self, metadata);
+				}
+			};
+
+			/*
+			todo: export publicly accessible object with fewer methods
+			public methods:
+			- isActive
+			- modify
+			- remove (from parent)
+			- id
+			- event handling (on/off)
+			- get parent object
+			- get container?
+			- get special values, provided by definition
+			*/
+
+			this.play = function () {
+				//todo: update play/playing state
+				if (playerMethods.play) {
+					playerMethods.play();
+				}
+			};
+
+			this.pause = function () {
+				//todo: update play/playing state
+				if (playerMethods.pause) {
+					playerMethods.pause();
+				}
+			};
+
+			this.activate = function () {
+				if (!this.active) {
+					this.active = true;
+
+					if (playerMethods.activate) {
+						playerMethods.activate();
+					}
+					//todo: seek to appropriate place based on parent's currentTime
+					//todo: if parent is playing, try to play
+					//self.play();
+					self.emit('activate', self);
+				}
+			};
+
+			this.deactivate = function () {
+				if (this.active) {
+					this.active = false;
+
+					if (playerMethods.deactivate) {
+						playerMethods.deactivate();
+					}
+					self.pause();
+					self.emit('deactivate', self);
+				}
+			};
+
+			this.destroy = function () {
+				self.deactivate();
+
+				parent.remove(id);
+
+				self.removeAllListeners();
+				//todo: clean up
+			};
+
+			this.src = function (src) {
+				/*
+				todo: we need a callback function that checks if the old source and new source have changed
+				- only reset if it has changed
+				- otherwise we can update it and call modify but don't need to reset
+				- e.g. src on video needs reset; new text for a text effect does not
+				- anything that makes buffered go backwards should cause a reset (or change duration?)
+				*/
+			};
+
+			/*
+			Time editing methods:
+			*/
+
+			/*
+			todo: what if start and/or end is negative?
+			todo: if/whenever duration changes, re-calculate this.end and tell parent to re-sort
+			*/
+
+			this.start = function (val) {
+				var time,
+					oldStart = start;
+
+				if (val !== undefined) {
+					time = parseTimeCode(val);
+					if (isNaN(time)) {
+						throw new Error('Clip.start - Unknown time value ' + time);
+					}
+
+					start = Math.max(0, time);
+					if (!isNaN(end)) {
+						end = Math.max(start + minClipLength, end);
+						maxTime = Math.max(maxTime, end);
+						//todo: adjust clip duration
+					}
+
+					minTime = Math.max(0, Math.min(minTime, start));
+
+					if (initialized && start !== oldStart) {
+						self.emit('timechange', self);
+					}
+				}
+
+				return start;
+			};
+
+			this.end = function (val) {
+				var oldEnd = end,
+					time;
+
+				if (val !== undefined) {
+					time = parseTimeCode(val);
+					if (isNaN(time)) {
+						throw new Error('Clip.start - Unknown time value ' + time);
+					}
+
+					end = time;
+					maxTime = Math.max(maxTime, end);
+					start = Math.min(start, end - minClipLength);
+					minTime = Math.max(0, Math.min(minTime, start));
+
+					if (initialized && oldEnd !== end && !(isNaN(end) && isNaN(oldEnd))) {
+						self.emit('timechange', self);
+					}
+				}
+
+				if (end === undefined) {
+					return Infinity;
+				}
+				return end;
+			};
+
+			this.trim = function (min, max) {
+				var oldStart = start,
+					oldEnd = oldEnd,
+					change = false;
+
+				if (isNaN(min)) {
+					min = 0;
+				}
+
+				if (isNaN(max)) {
+					max = Infinity;
+				}
+
+				if (max <= min) {
+					throw new Error('Clip.trim: max must be greater than min');
+				}
+
+				minTime = Math.max(min, minTime);
+				maxTime = Math.min(max, maxTime);
+
+				start = Math.max(start, minTime);
+				if (!isNaN(end)) {
+					end = Math.max(start, Math.min(end, maxTime));
+					change = end !== oldEnd;
+				}
+				change = change || start !== oldStart;
+
+				//todo: adjust from/to
+
+				if (change) {
+					self.emit('timechange', self);
+				}
+			};
+
+			this.shift = function (delta) {
+				var s, e;
+				s = start;
+				//todo: fill this in
+				//todo: don't forget to emit timechange if necessary
+			};
+
+			this.reset = reset;
+
+			this.metadata = {
+				duration: NaN
+			};
+
+			this.start(options.start || 0);
+			this.end(options.end);
+
+			plugin = extend({}, plugin);
+			if (plugin.definition) {
+				plugin = extend(plugin, plugin.definition.call(this, options));
+			}
+
+			//todo: is this audio, video or other?
+			reset(plugin.player);
+
+			initialized = true;
+		};
+
+		Layer = function (options) {
+			var self = this;
+
+			function sortClips() {
+				self.clips.sort(compareClipsByStart);
+			}
+
+			this.options = options;
+			this.clips = [];
+
+			this.id = options.id;
+
+			this.add = function (clip) {
+				/*
+				For now, we assume there are no duplicates. It may become necessary to
+				scan for and remove any duplicates.
+				*/
+				clip.layer = self;
+				clip.on('timechange', sortClips);
+				self.clips.push(clip);
+				sortClips();
+			};
+
+			this.remove = function (clipId) {
+				var i, clip;
+
+				for (i = 0; i < self.clips.length; i++) {
+					clip = self.clips[i];
+					if (clip.id === clipId) {
+						clip.off('timechange', sortClips);
+						clip.layer = null;
+						self.clips.splice(i, 1);
+						return;
+					}
+				}
+			};
+
+			this.destroy = function () {
+				/*
+				todo: clean out any events or options created later
+				*/
+			};
+
+			//todo: make publicly accessible object, if necessary?
+		};
+
+		/*
 		Match loading states of HTMLMediaElement
 		- allow `modify` method to determine whether to reset/empty state, based on properties changed
 		- property changes that make it less "loaded" should trigger state reset
@@ -844,6 +839,13 @@ module.exports = (function (window) {
 			var id = guid('spacetime'); //todo: allow forced id?
 
 			/*
+			todo:
+			Allow a composition to clone an alien clip by making the properties
+			on the public clip object match the options parameter for Spacetime.add
+			Need to be able to pass just an 'options object' and have hook specified in there
+			*/
+
+			/*
 			todo: smart loading to infer hook by cycling through all plugins,
 			running canPlaySrc on each one
 			if no plugin found, throw error
@@ -861,7 +863,7 @@ module.exports = (function (window) {
 
 			loadClip(id, plugins[hook], options);
 
-			return that;
+			return spacetime;
 		};
 
 		//remove a clip
@@ -922,7 +924,7 @@ module.exports = (function (window) {
 				//todo: fire event for clip removed with clip id
 			}
 
-			return that;
+			return spacetime;
 		};
 
 		/*
@@ -973,7 +975,7 @@ module.exports = (function (window) {
 				order = Math.max(0, order);
 			}
 
-			layer = new Layer(that, {
+			layer = new Layer({
 				id: id
 			});
 			layersById[id] = layer;
@@ -985,7 +987,7 @@ module.exports = (function (window) {
 
 			//todo: notify compositors of layer addition and order update
 
-			return that;
+			return spacetime;
 		};
 
 		this.removeLayer = function (id) {
@@ -1002,12 +1004,12 @@ module.exports = (function (window) {
 			}
 
 			if (!layer) {
-				return that;
+				return spacetime;
 			}
 
 			// destroy any clips on this layer
 			layer.clips.forEach(function (clip) {
-				that.remove(clip.id);
+				spacetime.remove(clip.id);
 			});
 			layer.destroy();
 
@@ -1019,7 +1021,7 @@ module.exports = (function (window) {
 
 			//todo: notify compositors of layer removal
 
-			return that;
+			return spacetime;
 		};
 
 		//todo: set/get "global" properties that get passed to plugins, compositor
@@ -1047,7 +1049,7 @@ module.exports = (function (window) {
 				}
 			}
 
-			return that;
+			return spacetime;
 		};
 
 		this.play = function () {
@@ -1062,7 +1064,7 @@ module.exports = (function (window) {
 				}
 			}
 
-			return that;
+			return spacetime;
 		};
 
 		Object.defineProperty(this, 'currentTime', {
@@ -1130,7 +1132,7 @@ module.exports = (function (window) {
 
 			// destroy all layers and clips
 			for (i = layersOrder.length - 1; i >= 0; i--) {
-				that.removeLayer(layersOrder[i].id);
+				spacetime.removeLayer(layersOrder[i].id);
 			}
 
 			spacetime.removeAllListeners();
