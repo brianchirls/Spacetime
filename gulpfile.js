@@ -10,7 +10,7 @@ var webpackConfig = require('./webpack.config.js');
 // Disadvantage: Requests are not blocked until bundle is available,
 //               can serve an old app on refresh
 gulp.task('watch', ['webpack:build-dev'], function() {
-	gulp.watch(['src/**/*'], ['webpack:build-dev']);
+	gulp.watch(['spacetime.js', 'lib/**/*'], ['webpack:build-dev']);
 });
 
 // Development build
