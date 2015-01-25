@@ -87,8 +87,46 @@ module.exports = (function (window) {
 		return id;
 	}
 
+	function compareClipsByStart(a, b) {
+		var diff;
+
+		if (a === b) {
+			return 0;
+		}
+
+		diff = a.start() - b.start() ||
+			(a.end() || a.start()) - (b.end() || b.start());
+
+		if (!diff) {
+			return a.id < b.id ? -1 : 1;
+		}
+
+		return diff;
+	}
+
+	function compareClipsByEnd(a, b) {
+		var diff;
+		if (a === b) {
+			return 0;
+		}
+		diff = (a.end() || a.start()) - (b.end() || b.start()) ||
+			a.start() - b.start();
+
+		if (!diff) {
+			return a.id < b.id ? -1 : 1;
+		}
+
+		return diff;
+	}
+
 	/*
 		Constructors
+		todo:
+			If we don't want to allow clips and layers to be transferred
+			from one composition to another, move constructors inside Spacetime.
+
+			Maybe allow a composition to clone an alien clip by making the properties
+			on the public clip object match the options parameter for Spacetime.add
 	*/
 
 	function Clip(parent, plugin, options) {
@@ -171,6 +209,7 @@ module.exports = (function (window) {
 		}
 
 		this.parent = parent;
+		this.active = false;
 		this.id = id;
 		this.startIndex = -1;
 		this.endIndex = -1;
@@ -185,8 +224,6 @@ module.exports = (function (window) {
 		- getCurrentTime
 		- play
 		- pause
-		- activate
-		- deactivate (calls pause)
 		- destroy (calls pause)
 		- modify
 		- load(start, end). load(0, 0) means just metadata
@@ -268,20 +305,29 @@ module.exports = (function (window) {
 		};
 
 		this.activate = function () {
-			if (playerMethods.activate) {
-				playerMethods.activate();
+			if (!this.active) {
+				this.active = true;
+
+				if (playerMethods.activate) {
+					playerMethods.activate();
+				}
+				//todo: seek to appropriate place based on parent's currentTime
+				//todo: if parent is playing, try to play
+				//that.play();
+				that.emit('activate', that);
 			}
-			//todo: if parent is playing, try to play
-			//that.play();
-			that.emit('activate', that);
 		};
 
 		this.deactivate = function () {
-			if (playerMethods.deactivate) {
-				playerMethods.deactivate();
+			if (this.active) {
+				this.active = false;
+
+				if (playerMethods.deactivate) {
+					playerMethods.deactivate();
+				}
+				that.pause();
+				that.emit('deactivate', that);
 			}
-			that.pause();
-			that.emit('deactivate', that);
 		};
 
 		this.destroy = function () {
@@ -359,6 +405,9 @@ module.exports = (function (window) {
 				}
 			}
 
+			if (end === undefined) {
+				return Infinity;
+			}
 			return end;
 		};
 
@@ -421,6 +470,52 @@ module.exports = (function (window) {
 		reset(plugin.player);
 
 		initialized = true;
+	}
+
+	function Layer(parent, options) {
+		var that = this;
+
+		function sortClips() {
+			that.clips.sort(compareClipsByStart);
+		}
+
+		this.options = options;
+		this.clips = [];
+
+		this.id = options.id;
+
+		this.add = function (clip) {
+			/*
+			For now, we assume there are no duplicates. It may become necessary to
+			scan for and remove any duplicates.
+			*/
+			clip.layer = that;
+			clip.on('timechange', sortClips);
+			that.clips.push(clip);
+			sortClips();
+		};
+
+		this.remove = function (clipId) {
+			var i, clip;
+
+			for (i = 0; i < that.clips.length; i++) {
+				clip = that.clips[i];
+				if (clip.id === clipId) {
+					clip.off('timechange', sortClips);
+					clip.layer = null;
+					that.clips.splice(i, 1);
+					return;
+				}
+			}
+		};
+
+		this.destroy = function () {
+			/*
+			todo: clean out any events or options created later
+			*/
+		};
+
+		//todo: make publicly accessible object, if necessary?
 	}
 
 	function Spacetime(opts) {
@@ -493,38 +588,6 @@ module.exports = (function (window) {
 
 			id;
 
-		function compareClipsByStart(a, b) {
-			var diff;
-
-			if (a === b) {
-				return 0;
-			}
-
-			diff = a.start() - b.start() ||
-				(a.end() || a.start()) - (b.end() || b.start());
-
-			if (!diff) {
-				return a.id < b.id ? -1 : 1;
-			}
-
-			return diff;
-		}
-
-		function compareClipsByEnd(a, b) {
-			var diff;
-			if (a === b) {
-				return 0;
-			}
-			diff = (a.end() || a.start()) - (b.end() || b.start()) ||
-				a.start() - b.start();
-
-			if (!diff) {
-				return a.id < b.id ? -1 : 1;
-			}
-
-			return diff;
-		}
-
 		function loadCompositor(list, type, def) {
 			var compositor,
 				name;
@@ -553,6 +616,10 @@ module.exports = (function (window) {
 		}
 
 		function activateClip(clip) {
+			/*
+			todo: probably want to have this trigger Clip object, not other way around
+			that way we can check time range here
+			*/
 			activeClips[clip.id] = clip;
 			//todo: update play/waiting state
 		}
@@ -675,16 +742,36 @@ module.exports = (function (window) {
 
 		function loadClip(id, plugin, options) {
 			var id,
-				clip;
+				clip,
+				layer,
+				layerId;
 
 			options = extend({}, options);
 			options.id = id;
 
 			/*
-			todo: determine which layer to place clip on
-			if clip overlaps with existing clip on same layer,
-			replace it for that period of time
+			todo: if Layer gets moved inside Spacetime, move all this logic
+			into Clip object
 			*/
+			layerId = options.layer;
+			if (typeof layerId === 'number') {
+				if (layerId >= 0 && layersOrder[layerId]) {
+					layer = layersOrder[layerId];
+				}
+			} else if (typeof layerId === 'string' && layerId) {
+				layer = layersById[layerId];
+			}
+
+			/*
+			todo: if layer is specified and clip overlaps with existing clip on same layer,
+			trim existing clip for that period of time
+			*/
+			if (!layer) {
+				layerId = guid('spacetime');
+				that.addLayer(layerId);
+				layer = layersById[layerId];
+			}
+			options.layer = layer;
 
 			clip = new Clip(that, plugin, options);
 
@@ -693,6 +780,8 @@ module.exports = (function (window) {
 			todo:
 			make a lookup of clips by 'name' option and make that searchable later
 			*/
+
+			layer.add(clip);
 
 			/*
 			add listener to clip for when it changes and re-sort if
@@ -710,6 +799,14 @@ module.exports = (function (window) {
 			});
 
 			updateClipTimes(clip);
+
+			//todo: fire event for clip added, with clip id
+
+			//will only activate if in time range
+			//todo: only if clip, plugin and layer are enabled
+			if (playerState.currentTime >= clip.start() && playerState.currentTime < clip.end()) {
+				clip.activate();
+			}
 		}
 
 		/*
@@ -763,6 +860,8 @@ module.exports = (function (window) {
 			*/
 
 			loadClip(id, plugins[hook], options);
+
+			return that;
 		};
 
 		//remove a clip
@@ -810,11 +909,20 @@ module.exports = (function (window) {
 
 				delete clipsById[clipId];
 
+				// remove clip from layer
+				if (clip.layer) {
+					clip.layer.remove(clipId);
+				}
+
 				//todo: destroy the clip?
 				clip.off('timechange', updateClipTimes);
 				clip.off('activate', activateClip);
 				clip.off('deactivate', deactivateClip);
+
+				//todo: fire event for clip removed with clip id
 			}
+
+			return that;
 		};
 
 		/*
@@ -823,7 +931,96 @@ module.exports = (function (window) {
 		- the currently loaded compositor can handle both the plugin and the clip
 		*/
 
-		//todo list/search clips by time, hook or id
+		//todo: list/search clips by time, hook, layer and/or id
+		//todo: getClipById - need public clip class
+		//todo: get history of added clip ids?
+		//todo: enable/disable clip
+		//todo: move a clip from one layer to another
+
+		/*
+		layer CRUD methods
+		todo: search layer(s); getLayerById
+		- layer order
+		- whether layer is enabled/disabled
+		- "custom" layer options passed to compositor?
+		todo: get history of added layer ids?
+		todo: rename layer?
+		todo: move layer order
+		todo: enable/disable layer
+		*/
+		this.addLayer = function (id, order) {
+			var layer;
+			//todo: third argument for clip(s) to add to layer? or options?
+			//todo: "custom" layer options passed to compositor?
+
+			if (typeof id === 'number') {
+				if (order === undefined) {
+					order = id;
+				} else {
+					id = String(id);
+				}
+			}
+
+			if (!id) {
+				id = guid('spacetime');
+			} else if (layersById[id]) {
+				throw new Error('Spacetime.addLayer - layer already exists: ' + id);
+			}
+
+			if (isNaN(order)) {
+				order = layersOrder.length;
+			} else {
+				order = Math.max(0, order);
+			}
+
+			layer = new Layer(that, {
+				id: id
+			});
+			layersById[id] = layer;
+			if (order < layersOrder.length) {
+				layersOrder.splice(order, 0, layer);
+			} else {
+				layersOrder[order] = layer;
+			}
+
+			//todo: notify compositors of layer addition and order update
+
+			return that;
+		};
+
+		this.removeLayer = function (id) {
+			var layer,
+				i,
+				clips;
+
+			// make sure this layer exists
+			if (typeof id === 'number') {
+				layer = layersOrder[id];
+				id = layer && layer.id;
+			} else if (typeof id === 'string') {
+				layer = layersById[id];
+			}
+
+			if (!layer) {
+				return that;
+			}
+
+			// destroy any clips on this layer
+			layer.clips.forEach(function (clip) {
+				that.remove(clip.id);
+			});
+			layer.destroy();
+
+			i = layersOrder.indexOf(layer);
+			if (i >= 0) {
+				layersOrder.splice(i, 1);
+			}
+			delete layersById[id];
+
+			//todo: notify compositors of layer removal
+
+			return that;
+		};
 
 		//todo: set/get "global" properties that get passed to plugins, compositor
 
@@ -849,6 +1046,8 @@ module.exports = (function (window) {
 					activeClips[key].pause();
 				}
 			}
+
+			return that;
 		};
 
 		this.play = function () {
@@ -862,6 +1061,8 @@ module.exports = (function (window) {
 					activeClips[key].play();
 				}
 			}
+
+			return that;
 		};
 
 		Object.defineProperty(this, 'currentTime', {
@@ -921,19 +1122,18 @@ module.exports = (function (window) {
 		*/
 
 		this.destroy = function () {
-			var key;
+			var i;
 
 			isDestroyed = true;
 
 			cancelAnimationFrame(animationRequestId);
 
-			spacetime.removeAllListeners();
-
-			for (key in clipsById) {
-				if (hasOwn(clipsById, key)) {
-					this.remove(key);
-				}
+			// destroy all layers and clips
+			for (i = layersOrder.length - 1; i >= 0; i--) {
+				that.removeLayer(layersOrder[i].id);
 			}
+
+			spacetime.removeAllListeners();
 
 			forEach(compositors, function (compositor) {
 				if (compositor && compositor.destroy) {
