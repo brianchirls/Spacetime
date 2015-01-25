@@ -2,16 +2,18 @@ module.exports = (function (window) {
 	'use strict';
 
 	var document = window.document,
-		console = window.console,
 
 	/*
-		Utility functions
+		Utility functions (other files)
 	*/
 		eventEmitterize = require('./lib/event-emitterize'),
 		parseTimeCode = require('./lib/parse-timecode'),
+		extend = require('./lib/utils').extend,
+		hasOwn = require('./lib/utils').hasOwn,
+		consoleMethod = require('./lib/utils').consoleMethod,
+		findFirst = require('./lib/utils').findFirst,
 		forEach = require('lodash.foreach'),
 		binarySearch = require('binary-search'),
-		nop = function () {},
 
 	/*
 		Global "environment" variables
@@ -64,8 +66,8 @@ module.exports = (function (window) {
 		},
 
 	/*
-	todo: shims and API status
-	- web audio API
+	shims and API status
+	- todo: web audio API?
 	*/
 		requestAnimationFrame = require('./lib/raf').requestAnimationFrame,
 		cancelAnimationFrame = require('./lib/raf').cancelAnimationFrame,
@@ -82,78 +84,6 @@ module.exports = (function (window) {
 		var id = (prefix || '') + maxGlobalId;
 		maxGlobalId++;
 		return id;
-	}
-
-	function findFirst(array, callback, thisArg) {
-		var i, n, value;
-
-		if (array.find) {
-			return array.find(callback, thisArg);
-		}
-
-		for (i = 0, n = array.length; i < n; i++) {
-			value = array[i];
-			if (callback.call(thisArg, value, i, array)) {
-				return value;
-			}
-		}
-
-		return undefined;
-	}
-
-	function hasOwn(obj, property) {
-		return Object.prototype.hasOwnProperty.call(obj, property);
-	}
-
-	function extend(dest, src) {
-		var property,
-			descriptor;
-
-		if (dest.prototype && src.prototype && dest.prototype !== src.prototype) {
-			extend(dest.prototype, src.prototype);
-		}
-
-		for (property in src) {
-			if (hasOwn(src, property)) {
-				descriptor = Object.getOwnPropertyDescriptor(src, property);
-
-				if (descriptor.get || descriptor.set) {
-					Object.defineProperty(dest, property, {
-						configurable: true,
-						enumerable: true,
-						get: descriptor.get,
-						set: descriptor.set
-					});
-				} else {
-					dest[property] = src[property];
-				}
-			}
-		}
-
-		return dest;
-	}
-
-	function consoleMethod(name) {
-		var method;
-		if (!console) {
-			return nop;
-		}
-
-		if (typeof console[name] === 'function') {
-			method = console[name];
-		} else if (typeof console.log === 'function') {
-			method = console.log;
-		} else {
-			return nop;
-		}
-
-		if (method.bind) {
-			return method.bind(console);
-		}
-
-		return function () {
-			method.apply(console, arguments);
-		};
 	}
 
 	/*
@@ -750,7 +680,7 @@ module.exports = (function (window) {
 
 		/*
 		player methods
-		todo: make this look like a HTMLMediaElement
+		todo: make this look like a HTMLMediaElement?
 		- canPlayType
 		- canPlaySrc?
 		- fastSeek?

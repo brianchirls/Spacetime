@@ -28,6 +28,7 @@ module.exports = {
     //pretty strict
     jshint: {
         bitwise: true,
+        browser: true,
         camelcase: true,
         curly: true,
         eqeqeq: true,
