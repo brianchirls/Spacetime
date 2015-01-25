@@ -90,9 +90,8 @@ module.exports = (function (window) {
 		Constructors
 	*/
 
-	function Clip(parent, plugin, options) {
-		var id = guid('spacetime'), //todo: allow forced id?
-			that = this,
+	function Clip(parent, id, plugin, options) {
+		var that = this,
 			playerMethods = {};
 
 		function reset(player) {
@@ -315,7 +314,8 @@ module.exports = (function (window) {
 
 	function Spacetime(opts) {
 		//initialize object, private properties
-		var options = opts || {},
+		var that = this,
+			options = opts || {},
 			spacetime = this,
 			isDestroyed = false,
 			compositors = {},
@@ -548,6 +548,32 @@ module.exports = (function (window) {
 			*/
 		}
 
+		function loadClip(id, plugin, options) {
+			var id,
+				clip;
+
+			clip = new Clip(that, id, plugin, options);
+
+			clipsById[clip.id] = clip;
+
+			/*
+			add listener to clip for when it changes and re-sort if
+			start/end time are different
+			*/
+			clip.on('timechange', updateClipTimes);
+			clip.on('activate', activateClip);
+			clip.on('deactivate', deactivateClip);
+
+			forEach(compositors, function (compositor) {
+				//todo: make sure it supports this type of clip
+				if (compositor && compositor.add) {
+					compositor.add.call(spacetime, clip);
+				}
+			});
+
+			updateClipTimes(clip);
+		}
+
 		/*
 		Match loading states of HTMLMediaElement
 		- allow `modify` method to determine whether to reset/empty state, based on properties changed
@@ -580,37 +606,23 @@ module.exports = (function (window) {
 		//add or update a clip
 		//todo: allow batch loading of multiple clips
 		this.add = function (hook, options) {
-			var clip,
-				i;
+			var id = guid('spacetime'); //todo: allow forced id?
+
 			/*
 			todo: smart loading to infer hook by cycling through all plugins,
 			running canPlaySrc on each one
+			if no plugin found, throw error
 			*/
-			clip = new Clip(this, plugins[hook], options);
 
 			/*
 			todo: keep a queue of clips that are missing start times and append them
-			once all clips before have been given a duration
+			once all clips before have been given a duration.
+			Need to figure out what happens if clip with times is loaded async
+			in between two clips without times.
+			And what if an earlier clip is removed before the next clip becomes eligible?
 			*/
 
-			clipsById[clip.id] = clip;
-
-			/*
-			add listener to clip for when it changes and re-sort if
-			start/end time are different
-			*/
-			clip.on('timechange', updateClipTimes);
-			clip.on('activate', activateClip);
-			clip.on('deactivate', deactivateClip);
-
-			forEach(compositors, function (compositor) {
-				//todo: make sure it supports this type of clip
-				if (compositor && compositor.add) {
-					compositor.add.call(spacetime, clip);
-				}
-			});
-
-			updateClipTimes(clip);
+			loadClip(plugins[hook], options);
 		};
 
 		//remove a clip
@@ -671,9 +683,9 @@ module.exports = (function (window) {
 		- the currently loaded compositor can handle both the plugin and the clip
 		*/
 
-		//todo list/search clips by time or hook
+		//todo list/search clips by time, hook or id
 
-		//todo: set/get "global" properties
+		//todo: set/get "global" properties that get passed to plugins, compositor
 
 		eventEmitterize(this);
 		//todo: first, next promises
