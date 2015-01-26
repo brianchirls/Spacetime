@@ -1019,6 +1019,13 @@ module.exports = (function (window) {
 		this.compositor = function (hook, definition) {
 			var compositor;
 
+			/*
+			todo: this needs to be completely rewritten to replace any existing
+			compositors of this type, and it should actually be activated
+
+			or just get rid of it
+			*/
+
 			if (compositorPlugins[hook]) {
 				Spacetime.logger.warn('Compositor [' + hook + '] already loaded');
 				return spacetime;
