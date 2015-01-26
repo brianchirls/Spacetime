@@ -21,14 +21,15 @@ module.exports = (function (window) {
 
 		maxGlobalId = Date.now(), //todo: come up with something better than this
 		globalPlugins = {},
+		globalCompositors = {},
 		minClipLength = 1 / 16,
 
 	/*
 		Global reference variables
 	*/
 		defaultCompositors = {
-			audio: [],
-			video: []
+			audio: ['basic-audio'],
+			video: ['dom-video']
 			//todo: data, subtitles, 3d?
 		},
 
@@ -198,6 +199,7 @@ module.exports = (function (window) {
 				compositor,
 				name;
 
+
 			if (list && !Array.isArray(list)) {
 				if (typeof list === 'string') {
 					list = [list];
@@ -206,9 +208,15 @@ module.exports = (function (window) {
 				}
 			}
 			definition = findFirst((list || []).concat(def), function (comp) {
+				if (typeof comp === 'string') {
+					comp = globalCompositors[comp];
+				}
 				return comp && comp.type === type &&
 					(!comp.compatible || comp.compatible());
 			});
+			if (typeof definition === 'string') {
+				definition = globalCompositors[definition];
+			}
 
 			//there should always be at least the default compositor that's compatible and loaded
 
@@ -1392,13 +1400,10 @@ module.exports = (function (window) {
 		globalPlugins[hook] = definition;
 	};
 
-	Spacetime.compositor = function (definition) {
+	Spacetime.compositor = function (hook, definition) {
 		//keeping it simple for now
 		//todo: make sure type exists
-		if (!defaultCompositors[definition.type]) {
-			defaultCompositors[definition.type] = [];
-		}
-		defaultCompositors[definition.type].push(definition);
+		globalCompositors[hook] = definition;
 	};
 
 	/*
@@ -1427,11 +1432,10 @@ module.exports = (function (window) {
 		};
 	});
 
-	Spacetime.compositor(require('./compositors/spacetime.dom-video'));
+	Spacetime.compositor('dom-video', require('./compositors/spacetime.dom-video'));
 
-	Spacetime.compositor({
+	Spacetime.compositor('basic-audio', {
 		title: 'Basic Audio',
-		id: 'basic-audio',
 		type: 'audio',
 		definition: function () {
 			return {
