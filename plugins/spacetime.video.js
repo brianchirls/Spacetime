@@ -1,23 +1,20 @@
-/*jslint devel: true, bitwise: true, browser: true, white: true, nomen: true, plusplus: true, maxerr: 50, indent: 4, todo: true */
-/*global define, require, exports */
 (function (root, factory) {
 	'use strict';
 
-	//todo: load Q as a dependency
-
-	if (typeof define === 'function' && define.amd) {
-		// AMD. Register as an anonymous module.
-		define(['spacetime'], factory);
-	} else if (typeof exports === 'object') {
-		factory(require('spacetime'));
+	if(typeof exports === 'object' && typeof module === 'object') {
+		module.exports = factory();
+	} else if(typeof define === 'function' && define.amd) {
+		define(factory);
+	} else if(typeof exports === 'object') {
+		exports['SpacetimeVideo'] = factory();
 	} else {
-		// Browser globals
-		factory(root.Spacetime);
+		root['SpacetimeVideo'] = factory();
 	}
-}(this, function (Spacetime, undefined) {
+
+}(this, function () {
 	'use strict';
 
-	Spacetime.plugin('video', function (options) {
+	function SpacetimeVideo(options) {
 		var video,
 			ownElement = false,
 			hasMetadata = false,
@@ -145,12 +142,14 @@
 			- videoHeight
 			*/
 		};
-	}, {
-		/*
-		todo:
-		canPlayType:
-		canPlaySrc:
-		*/
-		compositors: ['dom-video', 'seriously']
-	});
+	}
+
+	SpacetimeVideo.compositors = ['dom-video', 'seriously']
+	/*
+	todo:
+	- canPlayType:
+	- canPlaySrc:
+	*/
+
+	return SpacetimeVideo;
 }));

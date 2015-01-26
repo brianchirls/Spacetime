@@ -20,17 +20,15 @@ module.exports = (function (window) {
 	*/
 
 		maxGlobalId = Date.now(), //todo: come up with something better than this
-		plugins = {},
-		compositorPlugins = {},
-		allClipsByType = {},
+		globalPlugins = {},
 		minClipLength = 1 / 16,
 
 	/*
 		Global reference variables
 	*/
 		defaultCompositors = {
-			audio: 'basic-audio',
-			video: 'dom-video'
+			audio: [],
+			video: []
 			//todo: data, subtitles, 3d?
 		},
 
@@ -179,6 +177,9 @@ module.exports = (function (window) {
 			*/
 			updateThrottle = 16,
 
+			plugins = {},
+			compositorPlugins = {},
+
 			clipsByStart = [],
 			clipsByEnd = [],
 			clipsById = {},
@@ -193,7 +194,8 @@ module.exports = (function (window) {
 			id;
 
 		function loadCompositor(list, type, def) {
-			var compositor,
+			var definition,
+				compositor,
 				name;
 
 			if (list && !Array.isArray(list)) {
@@ -203,17 +205,19 @@ module.exports = (function (window) {
 					list = [];
 				}
 			}
-			name = findFirst((list || []).concat(def), function (id) {
-				var comp = compositorPlugins[id];
+			definition = findFirst((list || []).concat(def), function (comp) {
 				return comp && comp.type === type &&
 					(!comp.compatible || comp.compatible());
 			});
 
 			//there should always be at least the default compositor that's compatible and loaded
-			compositor = compositorPlugins[name];
-			compositor = extend({}, compositor);
-			if (compositor.definition) {
-				compositor = extend(compositor, compositor.definition.call(spacetime, options));
+
+			compositor = extend({}, definition);
+			if (typeof definition === 'function') {
+				extend(compositor, definition.call(spacetime));
+			}
+			if (typeof compositor.definition === 'function') {
+				extend(compositor, compositor.definition.call(spacetime, options));
 			}
 
 			return compositor;
@@ -345,7 +349,12 @@ module.exports = (function (window) {
 		}
 
 		function loadClip(clip) {
+			if (clipsById[clip.id]) {
+				return;
+			}
+
 			clipsById[clip.id] = clip;
+			plugins[clip.type].clips[clip.id] = clip.id;
 			/*
 			todo:
 			make a lookup of clips by 'name' option and make that searchable later
@@ -521,6 +530,7 @@ module.exports = (function (window) {
 
 			this.active = false;
 			this.id = id;
+			this.type = plugin.id;
 
 			eventEmitterize(this);
 
@@ -945,6 +955,122 @@ module.exports = (function (window) {
 		};
 
 		/*
+		Methods for installing and removing all plugin types
+		*/
+
+		this.plugin = function (hook, definition) {
+			var type,
+				plugin;
+
+			if (plugins[hook]) {
+				Spacetime.logger.warn('Media Type [' + hook + '] already loaded');
+				return spacetime;
+			}
+
+			/*todo:
+			- object should include canPlayType (and canPlaySrc?) method/regex
+			- object should have a list of track types supported and whether each is required, e.g.:
+				- 'video' supports video, audio (neither required)
+				- 'text' supports video, required
+				- 'audio' supports audio, required
+			*/
+
+			if (typeof definition === 'function') {
+				plugin = {
+					definition: definition
+				};
+			} else if (typeof definition === 'object' && definition) {
+				plugin = extend({}, definition);
+			}
+
+			extend(plugin, definition);
+			plugin.clips = {};
+			plugin.id = hook;
+
+			if (!definition.title) {
+				definition.title = hook;
+			}
+
+			plugins[hook] = plugin;
+
+			return spacetime;
+		};
+
+		this.removePlugin = function (hook) {
+			var plugin;
+
+			if (!hook) {
+				return;
+			}
+
+			plugin = plugins[hook];
+
+			if (!plugin) {
+				return;
+			}
+
+			forEach(plugin.clips, spacetime.remove);
+
+			delete plugins[hook];
+
+			return spacetime;
+		};
+
+		this.compositor = function (hook, definition) {
+			var compositor;
+
+			if (compositorPlugins[hook]) {
+				Spacetime.logger.warn('Compositor [' + hook + '] already loaded');
+				return spacetime;
+			}
+
+			if (typeof definition === 'function') {
+				compositor = {
+					definition: definition
+				};
+			} else if (typeof definition === 'object' && definition) {
+				compositor = extend({}, definition);
+			}
+
+			extend(compositor, definition);
+			compositor.clips = {};
+			compositor.id = hook;
+
+			if (!definition.type) {
+				/*
+				todo: does it need to be one of the pre-defined compositor types? (video, audio, data) probably not
+				*/
+				Spacetime.logger.error('Cannot define compositor [' + hook + '] without a type');
+				return;
+			}
+
+			if (!definition.title) {
+				definition.title = hook;
+			}
+
+			compositorPlugins[hook] = compositor;
+
+			return spacetime;
+		};
+
+		this.removeCompositor = function (hook) {
+			var compositor;
+
+			if (!hook) {
+				return;
+			}
+
+			compositor = compositorPlugins[hook];
+
+			/*
+			todo: figure out what do to here
+			In practice, this is probably just here for cleaning up unit tests
+			*/
+
+			delete compositorPlugins[hook];
+		};
+
+		/*
 		clip CRUD methods
 		*/
 
@@ -995,6 +1121,7 @@ module.exports = (function (window) {
 				removeClipFromLists(clip);
 
 				delete clipsById[clipId];
+				delete plugins[clip.type].clips[clip.id];
 
 				// remove clip from layer
 				if (clip.layer) {
@@ -1242,6 +1369,10 @@ module.exports = (function (window) {
 		*/
 		this.draw = draw;
 
+		forEach(globalPlugins, function (plugin, key) {
+			spacetime.plugin(key, plugin);
+		});
+
 		//todo: allow this to be toggled and queried after create
 		autoDraw = options.autoDraw === undefined ? true : !!options.autoDraw;
 		if (autoDraw) {
@@ -1249,126 +1380,18 @@ module.exports = (function (window) {
 		}
 	}
 
-	Spacetime.plugin = function (hook, definition, meta) {
-		var type;
-
-		if (plugins[hook]) {
-			Spacetime.logger.warn('Media Type [' + hook + '] already loaded');
-			return false;
-		}
-
-		if (meta === undefined && typeof definition === 'object') {
-			meta = definition;
-		}
-
-		/*
-		if (!meta) {
-			return false;
-		}
-		*/
-		/*todo:
-		- meta object should include canPlayType (and canPlaySrc?) method/regex
-		- meta object should have a list of track types supported and whether each is required, e.g.:
-			- 'video' supports video, audio (neither required)
-			- 'text' supports video, required
-			- 'audio' supports audio, required
-		*/
-
-		type = extend({}, meta);
-
-		if (typeof definition === 'function') {
-			type.definition = definition;
-		}
-
-		if (!type.title) {
-			type.title = hook;
-		}
-
-		plugins[hook] = type;
-		allClipsByType[hook] = [];
-
-		return true;
+	Spacetime.plugin = function (hook, definition) {
+		//keeping it simple for now
+		globalPlugins[hook] = definition;
 	};
 
-	Spacetime.removePlugin = function (hook) {
-		var all, clip, plugin;
-
-		if (!hook) {
-			return;
+	Spacetime.compositor = function (definition) {
+		//keeping it simple for now
+		//todo: make sure type exists
+		if (!defaultCompositors[definition.type]) {
+			defaultCompositors[definition.type] = [];
 		}
-
-		plugin = plugins[hook];
-
-		if (!plugin) {
-			return;
-		}
-
-		all = allClipsByType[hook];
-		if (all) {
-			while (all.length) {
-				clip = all.shift();
-				clip.destroy();
-			}
-			delete allClipsByType[hook];
-		}
-
-		delete plugins[hook];
-	};
-
-	Spacetime.compositor = function (hook, definition, meta) {
-		if (compositorPlugins[hook]) {
-			Spacetime.logger.warn('Compositor [' + hook + '] already loaded');
-			return false;
-		}
-
-		if (meta === undefined && typeof definition === 'object') {
-			meta = definition;
-		}
-
-		if (!meta.type) {
-			/*
-			todo: does it need to be one of the pre-defined compositor types? (video, audio, data) probably not
-			*/
-			Spacetime.logger.error('Cannot define compositor [' + hook + '] without a type');
-			return;
-		}
-
-		/*
-		if (!meta) {
-			return false;
-		}
-		*/
-
-		meta = extend({}, meta);
-
-		if (typeof definition === 'function') {
-			meta.definition = definition;
-		}
-
-		if (!meta.title) {
-			meta.title = hook;
-		}
-
-		compositorPlugins[hook] = meta;
-
-		return true;
-	};
-
-	Spacetime.removeCompositor = function (hook) {
-		var all, compositor, plugin;
-
-		if (!hook) {
-			return;
-		}
-
-		plugin = compositorPlugins[hook];
-
-		/*
-		todo: throw an error if any compositions are using it or destroy them?
-		In practice, this is probably just here for cleaning up unit tests
-		*/
-
-		delete compositorPlugins[hook];
+		defaultCompositors[definition.type].push(definition);
 	};
 
 	/*
@@ -1397,61 +1420,24 @@ module.exports = (function (window) {
 		};
 	});
 
-	Spacetime.compositor('dom-video', function (container, options) {
-		//this part runs when a new composition is created
-		var activeClass = options && options.activeClass || 'active';
-		return {
-			//for when parent container is set or changes
-			parent: function (parent) {
-			},
-			move: function (clip) {
-				//todo: set which layer this clip goes to. z-index, I guess? or sort order
-			},
-			add: function (clip) {
-				//new clip is added to the composition
-				//returns object to be operated upon
-				//if throws or returns false, add fails
-				//todo: just return the dom element object
+	Spacetime.compositor(require('./compositors/spacetime.dom-video'));
 
-				//todo: add to dom under container
-			},
-			activate: function (clip, element) {
-				element.classList.add(activeClass);
-			},
-			deactivate: function (clip, element) {
-				element.classList.remove(activeClass);
-			},
-			remove: function (clip, element) {
-				//clip is removed from composition
-				//todo: may not need to do anything here
-			},
-			destroy: function () {
-				//composition is destroyed
-			}
-		};
-	}, {
-		title: 'DOM Video',
-		type: 'video'
-	});
-
-	/*
-	todo: do we allow a single compositor to support both audio and video?
-	todo: what about data tracks?
-	*/
-	Spacetime.compositor('basic-audio', function () {
-		return {
-			properties: {
-				volume: function (element, volume) {
-					element.volume = Math.max(0, Math.min(1, volume));
-				},
-				muted: function (element, muted) {
-					element.muted = !!muted;
-				}
-			}
-		};
-	}, {
+	Spacetime.compositor({
 		title: 'Basic Audio',
-		type: 'audio'
+		id: 'basic-audio',
+		type: 'audio',
+		definition: function () {
+			return {
+				properties: {
+					volume: function (element, volume) {
+						element.volume = Math.max(0, Math.min(1, volume));
+					},
+					muted: function (element, muted) {
+						element.muted = !!muted;
+					}
+				}
+			};
+		}
 	});
 
 	return Spacetime;
