@@ -1388,6 +1388,10 @@ module.exports = (function (window) {
 			spacetime.plugin(key, plugin);
 		});
 
+		forEach(options.plugins, function (plugin, key) {
+			spacetime.plugin(key, plugin);
+		});
+
 		//todo: allow this to be toggled and queried after create
 		autoDraw = options.autoDraw === undefined ? true : !!options.autoDraw;
 		if (autoDraw) {
