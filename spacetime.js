@@ -297,52 +297,50 @@ module.exports = (function (window) {
 			}
 		}
 
-		function updateClipTimes(clip) {
-			var i, min = Infinity;
+		function removeClipFromLists(clip) {
+			var i;
 
-			//place clip into appropriate point in each queue
-			if (clip.startIndex >= 0) {
-				min = clip.startIndex;
-				clipsByStart.splice(clip.startIndex, 1);
-				if (startIndex > clip.startIndex) {
+			i = binarySearch(clipsByStart, clip, compareClipsByStart);
+			if (i >= 0) {
+				clipsByStart.splice(i, 1);
+				if (startIndex >= i) {
 					startIndex--;
 				}
 			}
+
+			i = binarySearch(clipsByEnd, clip, compareClipsByEnd);
+			if (i >= 0) {
+				clipsByEnd.splice(i, 1);
+				if (endIndex >= i) {
+					endIndex--;
+				}
+			}
+		}
+
+		function addClipToLists(clip) {
+			var i;
+
+			//place clip into appropriate point in each queue
 			i = binarySearch(clipsByStart, clip, compareClipsByStart);
 			i = ~i; // jshint ignore:line
-			min = Math.min(min, i);
 			if (i <= startIndex) {
 				startIndex++;
 			}
 			clipsByStart.splice(i, 0, clip);
-			for (i = min; i < clipsByStart.length; i++) {
-				clipsByStart[i].startIndex = i;
-			}
 
-			min = Infinity;
-			if (clip.endIndex >= 0) {
-				clipsByEnd.splice(clip.endIndex, 1);
-				if (endIndex > clip.endIndex) {
-					endIndex--;
-				}
-			}
 			i = binarySearch(clipsByEnd, clip, compareClipsByEnd);
 			i = ~i; // jshint ignore:line
-			min = Math.min(min, i);
 			if (i <= endIndex) {
 				endIndex++;
 			}
 			clipsByEnd.splice(i, 0, clip);
-			for (i = min; i < clipsByEnd.length; i++) {
-				clipsByEnd[i].endIndex = i;
-			}
 
 			update(true);
 
 			/*
 			todo:
 			- set any missing start times
-			- recalculate total duration if there's nothing left in the queue
+			- recalculate total duration
 			*/
 		}
 
@@ -357,10 +355,13 @@ module.exports = (function (window) {
 			add listener to clip for when it changes and re-sort if
 			start/end time are different
 			*/
-			clip.on('timechange', updateClipTimes);
 			clip.on('activate', activateClip);
 			clip.on('deactivate', deactivateClip);
 
+			/*
+			todo: allow option for blacklist or whitelist of which compositors to include for a clip
+			- e.g. use only the audio track of a video clip
+			*/
 			forEach(compositors, function (compositor) {
 				//todo: make sure it supports this type of clip
 				if (compositor && compositor.add) {
@@ -368,7 +369,7 @@ module.exports = (function (window) {
 				}
 			});
 
-			updateClipTimes(clip);
+			addClipToLists(clip);
 
 			//todo: fire event for clip added, with clip id
 
@@ -520,8 +521,6 @@ module.exports = (function (window) {
 
 			this.active = false;
 			this.id = id;
-			this.startIndex = -1;
-			this.endIndex = -1;
 
 			eventEmitterize(this);
 
@@ -545,11 +544,13 @@ module.exports = (function (window) {
 
 			this.loadMetadata = function (values) {
 				var k,
+					i,
 					duration,
 					metadata = self.metadata,
 					changed = false,
 					durationchange = false,
-					oldEnd = end;
+					oldEnd = end,
+					newEnd;
 
 				//todo: make sure duration is not negative or Infinity
 				duration = values.duration;
@@ -572,12 +573,15 @@ module.exports = (function (window) {
 						if (isNaN(duration)) {
 							duration = minClipLength;
 						}
-						if (isNaN(end)) {
-							end = Infinity;
-						}
-						end = Math.min(end, Math.min(maxTime, start + duration));
+						newEnd = isNaN(newEnd) ? Infinity : end;
+						newEnd = Math.min(newEnd, Math.min(maxTime, start + duration));
 
-						if (initialized && oldEnd !== end && !(isNaN(end) && isNaN(oldEnd))) {
+						if (initialized && oldEnd !== newEnd && !(isNaN(newEnd) && isNaN(oldEnd))) {
+							// remove it from the old place in queues before re-inserting to the new place
+							removeClipFromLists(self);
+							end = newEnd;
+							addClipToLists(self);
+
 							self.emit('timechange', self);
 						}
 					}
@@ -988,33 +992,7 @@ module.exports = (function (window) {
 					}
 				});
 
-				i = clip.startIndex;
-				if (i < 0 || clipsByStart[i] !== clip) {
-					i = binarySearch(clipsByStart, clip, compareClipsByStart);
-				}
-				if (i >= 0) {
-					clipsByStart.splice(i, 1);
-					if (startIndex >= i) {
-						startIndex--;
-					}
-					for (; i < clipsByStart.length; i++) {
-						clipsByStart[i].startIndex = i;
-					}
-				}
-
-				i = clip.endIndex;
-				if (i < 0 || clipsByEnd[i] !== clip) {
-					i = binarySearch(clipsByEnd, clip, compareClipsByEnd);
-				}
-				if (i >= 0) {
-					clipsByEnd.splice(i, 1);
-					if (endIndex >= i) {
-						endIndex--;
-					}
-					for (; i < clipsByEnd.length; i++) {
-						clipsByEnd[i].endIndex = i;
-					}
-				}
+				removeClipFromLists(clip);
 
 				delete clipsById[clipId];
 
@@ -1024,7 +1002,6 @@ module.exports = (function (window) {
 				}
 
 				//todo: destroy the clip?
-				clip.off('timechange', updateClipTimes);
 				clip.off('activate', activateClip);
 				clip.off('deactivate', deactivateClip);
 
