@@ -1,7 +1,7 @@
-module.exports = (function (window) {
+module.exports = (function (global) {
 	'use strict';
 
-	var document = window.document,
+	var
 
 	/*
 		Utility functions (other files)
@@ -71,8 +71,8 @@ module.exports = (function (window) {
 	*/
 		requestAnimationFrame = require('./lib/raf').requestAnimationFrame,
 		cancelAnimationFrame = require('./lib/raf').cancelAnimationFrame,
-		now = window.performance && window.performance.now ?
-			window.performance.now.bind(window.performance) :
+		now = global.performance && global.performance.now ?
+			global.performance.now.bind(global.performance) :
 			Date.now.bind(Date);
 
 	/*
@@ -1162,7 +1162,7 @@ module.exports = (function (window) {
 		//todo: list/search clips by time, hook, layer and/or id
 		//todo: getClipById - need public clip class
 		//todo: get history of added clip ids?
-		//todo: enable/disable clip
+		//todo: enable/disable clip .disable(), .disable('video'), .disable(['video', '3d'])
 		//todo: move a clip from one layer to another
 
 		/*
