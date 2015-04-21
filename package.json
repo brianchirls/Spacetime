@@ -17,6 +17,8 @@
   },
   "homepage": "https://github.com/brianchirls/Spacetime",
   "devDependencies": {
+    "babel-core": "^5.1.11",
+    "babel-loader": "^5.0.0",
     "binary-search": "^1.2.0",
     "gulp": "^3.8.10",
     "gulp-header": "^1.2.2",

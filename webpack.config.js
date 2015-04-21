@@ -17,6 +17,11 @@ module.exports = {
         ],
         loaders: [
             {
+                test: /\.js$/,
+                exclude: /node_modules|bower_components/,
+                loader: 'babel-loader'
+            },
+            {
                 test:    /\.js$/,
                 exclude: /node_modules|bower_components/,
                 loader: 'jscs-loader'
@@ -61,11 +66,13 @@ module.exports = {
 
         failOnHint: true,
         emitErrors: true,
+        esnext: true
     },
 
     jscs: {
         emitErrors: true,
         failOnHint: true,
+        esnext: true,
 
         preset: 'crockford',
         validateIndentation: '\t',
