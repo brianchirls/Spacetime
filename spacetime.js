@@ -14,6 +14,7 @@ module.exports = (function (global) {
 		findFirst = require('./lib/utils').findFirst,
 		forEach = require('lodash.foreach'),
 		binarySearch = require('binary-search'),
+		Clock = require('./lib/clock'),
 
 	/*
 		Global "environment" variables
@@ -68,12 +69,10 @@ module.exports = (function (global) {
 	/*
 	shims and API status
 	- todo: web audio API?
+	- todo: move all rAF, now and timing stuff into Clock
 	*/
 		requestAnimationFrame = require('./lib/raf').requestAnimationFrame,
-		cancelAnimationFrame = require('./lib/raf').cancelAnimationFrame,
-		now = global.performance && global.performance.now ?
-			global.performance.now.bind(global.performance) :
-			Date.now.bind(Date);
+		cancelAnimationFrame = require('./lib/raf').cancelAnimationFrame;
 
 	/*
 		utility functions
@@ -167,7 +166,10 @@ module.exports = (function (global) {
 			//time control
 			lastUpdateTime = 0,
 			lastCurrentTime = -1,
+			timeout = -1,
 			playing = false, //is time actually progressing?
+			clock,
+			now,
 
 			autoDraw,
 			animationRequestId,
@@ -245,6 +247,45 @@ module.exports = (function (global) {
 			//todo: update play/waiting state
 		}
 
+		//todo: call updateFlow() any time waiting/playing state changes
+		//todo: call updateFlow() on seeking or seeked
+		function updateFlow() {
+			var inc = -1,
+				iStart,
+				iEnd,
+				currentTime = playerState.currentTime,
+				diff = 0,
+				delay = currentTime;
+
+			clock.clearTimeout(timeout);
+			if (playing && playerState.playbackRate) {
+				if (playerState.playbackRate > 0) {
+					delay = playerState.duration - currentTime;
+					iEnd = endIndex;
+					iStart = startIndex + 1;
+				} else {
+					iEnd = endIndex - 1;
+					iStart = startIndex;
+				}
+
+				if (iEnd >= 0 && iEnd < clipsByEnd.length) {
+					diff = Math.abs(clipsByEnd[iEnd].end() - currentTime);
+					if (diff > 0 && diff < delay) {
+						delay = diff;
+					}
+				}
+
+				if (iStart >= 0 && iStart < clipsByStart.length) {
+					diff = Math.abs(clipsByStart[iStart].start() - currentTime);
+					if (diff > 0 && diff < delay) {
+						delay = diff;
+					}
+				}
+
+				timeout = clock.setTimeout(update, delay);
+			}
+		}
+
 		function update(force) {
 			var currentTime,
 				rightNow = now(),
@@ -252,7 +293,7 @@ module.exports = (function (global) {
 				forward = true;
 
 			if (playing) {
-				currentTime = (rightNow - lastUpdateTime) * playerState.playbackRate;
+				currentTime = (rightNow - lastUpdateTime) * playerState.playbackRate / 1000;
 			} else {
 				currentTime = playerState.currentTime;
 			}
@@ -262,7 +303,7 @@ module.exports = (function (global) {
 			todo: come up with a better criterion for running update,
 			remove boolean trap
 			*/
-			if (!force && Math.abs(currentTime - playerState.currentTime) < 0.5) {
+			if (!force && Math.abs(currentTime - playerState.currentTime) < 0.005) {
 				return;
 			}
 
@@ -278,6 +319,7 @@ module.exports = (function (global) {
 			if (forward) {
 			} else {
 			}
+			todo: call updateFlow() after any events are started/ended
 			*/
 
 			//todo: if any one clip's currentTime is too far off expected value, fire 'waiting'
@@ -395,6 +437,8 @@ module.exports = (function (global) {
 			if (playerState.currentTime >= clip.start() && playerState.currentTime < clip.end()) {
 				clip.activate();
 			}
+
+			updateFlow();
 		}
 
 		/*
@@ -1148,6 +1192,8 @@ module.exports = (function (global) {
 				clip.off('deactivate', deactivateClip);
 
 				//todo: fire event for clip removed with clip id
+
+				updateFlow();
 			}
 
 			return spacetime;
@@ -1267,7 +1313,13 @@ module.exports = (function (global) {
 		this.pause = function () {
 			var key;
 
+			if (playerState.paused) {
+				return;
+			}
+
 			//todo: update play/playing state
+			playerState.paused = true;
+			playing = false; //todo: temp!
 
 			for (key in activeClips) {
 				if (hasOwn(activeClips, key)) {
@@ -1275,13 +1327,21 @@ module.exports = (function (global) {
 				}
 			}
 
+			updateFlow();
+
 			return spacetime;
 		};
 
 		this.play = function () {
 			var key;
 
+			if (!playerState.paused) {
+				return;
+			}
+
 			//todo: update play/playing state
+			playerState.paused = false;
+			playing = true; //todo: temp!
 
 			//todo: check if all these clips are ready to play first
 			for (key in activeClips) {
@@ -1289,6 +1349,8 @@ module.exports = (function (global) {
 					activeClips[key].play();
 				}
 			}
+
+			updateFlow();
 
 			return spacetime;
 		};
@@ -1353,8 +1415,11 @@ module.exports = (function (global) {
 			var i;
 
 			isDestroyed = true;
+			playing = false;
 
-			cancelAnimationFrame(animationRequestId);
+			cancelAnimationFrame(animationRequestId); //todo: handle this in clock
+			clock.clear();
+			updateFlow();
 
 			// destroy all layers and clips
 			for (i = layersOrder.length - 1; i >= 0; i--) {
@@ -1397,6 +1462,21 @@ module.exports = (function (global) {
 		if (autoDraw) {
 			requestAnimationFrame(draw);
 		}
+
+		/*
+		todo:
+		- allow passing of clock options to clock if needed?
+		- automatically pick clock based on platform/build?
+		*/
+		if (typeof options.clock === 'function') {
+			clock = new options.clock();
+		} else {
+			clock = new Clock();
+		}
+		now = clock.now;
+
+		//temp!!!
+		playerState.duration = 20;
 	}
 
 	Spacetime.plugin = function (hook, definition) {
@@ -1414,7 +1494,6 @@ module.exports = (function (global) {
 	Utilities
 	*/
 	Spacetime.util = Spacetime.prototype.util = {
-		now: now,
 		parseTimeCode: parseTimeCode
 		//todo: requestAnimationFrame, cancelAnimationFrame. make sure to account for missing requestID
 	};
