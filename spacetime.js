@@ -747,9 +747,13 @@ module.exports = (function (global) {
 					if (playerMethods.activate) {
 						playerMethods.activate();
 					}
+
 					//todo: seek to appropriate place based on parent's currentTime
-					//todo: if parent is playing, try to play
-					//self.play();
+
+					//if parent is playing, try to play
+					if (playing && playerState.playbackRate) {
+						self.play();
+					}
 					self.emit('activate', self);
 				}
 			};
