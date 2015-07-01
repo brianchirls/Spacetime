@@ -709,7 +709,7 @@ module.exports = (function (global) {
 						if (isNaN(duration)) {
 							duration = minClipLength;
 						}
-						newEnd = isNaN(newEnd) ? Infinity : end;
+						newEnd = isNaN(end) ? Infinity : end;
 						newEnd = Math.min(newEnd, Math.min(maxTime, start + duration));
 
 						if (initialized && oldEnd !== newEnd && !(isNaN(newEnd) && isNaN(oldEnd))) {
@@ -750,7 +750,7 @@ module.exports = (function (global) {
 
 					//todo: seek to appropriate place based on parent's currentTime
 
-					//if parent is playing, try to play
+					// if parent is playing, try to play
 					if (playing && playerState.playbackRate) {
 						self.play();
 					}
@@ -827,7 +827,7 @@ module.exports = (function (global) {
 				if (val !== undefined) {
 					time = parseTimeCode(val);
 					if (isNaN(time)) {
-						throw new Error('Clip.start - Unknown time value ' + time);
+						throw new Error('Clip.end - Unknown time value ' + time);
 					}
 
 					end = time;
