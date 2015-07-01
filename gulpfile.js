@@ -68,7 +68,7 @@ gulp.task('server', ['webpack-dev-server']);
 
 // modify some webpack config options
 var myDevConfig = Object.create(webpackConfig);
-myDevConfig.devtool = 'sourcemap';
+myDevConfig.devtool = 'eval';
 myDevConfig.debug = true;
 myDevConfig.output.pathInfo = true;
 

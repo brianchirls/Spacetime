@@ -69,7 +69,8 @@ module.exports = (function (global) {
 	/*
 	shims and API status
 	- todo: web audio API?
-	- todo: move all rAF, now and timing stuff into Clock
+	- todo: move all now and timing stuff into Clock
+	- todo: move requestAnimationFrame into compositor
 	*/
 		requestAnimationFrame = require('./lib/raf').requestAnimationFrame,
 		cancelAnimationFrame = require('./lib/raf').cancelAnimationFrame;
@@ -191,8 +192,8 @@ module.exports = (function (global) {
 			layersById = {},
 			layersOrder = [],
 
-			startIndex = -1,
-			endIndex = -1,
+			startIndex = 0,
+			endIndex = 0,
 
 			id;
 
@@ -249,6 +250,14 @@ module.exports = (function (global) {
 
 		//todo: call updateFlow() any time waiting/playing state changes
 		//todo: call updateFlow() on seeking or seeked
+		/*
+		updateFlow sets a timeout for the next time that an event needs to be
+		started or stopped. It can be redundant with the regular draw/update
+		cycle in most cases, but we may be able to remove update from every
+		draw call if we find it's not necessary. And, we can replace the Clock
+		with one using a web worker in the browser, so that events get
+		fired even when our tab is in the background.
+		*/
 		function updateFlow() {
 			var inc = -1,
 				iStart,
@@ -282,7 +291,8 @@ module.exports = (function (global) {
 					}
 				}
 
-				timeout = clock.setTimeout(update, delay);
+				//setTimeout takes milliseconds
+				timeout = clock.setTimeout(update, delay * 1000);
 			}
 		}
 
@@ -290,10 +300,12 @@ module.exports = (function (global) {
 			var currentTime,
 				rightNow = now(),
 				direction = 1,
-				forward = true;
+				forward = true,
+				clip,
+				needUpdateFlow = false;
 
 			if (playing) {
-				currentTime = (rightNow - lastUpdateTime) * playerState.playbackRate / 1000;
+				currentTime = playerState.currentTime + (rightNow - lastUpdateTime) * playerState.playbackRate / 1000;
 			} else {
 				currentTime = playerState.currentTime;
 			}
@@ -314,13 +326,67 @@ module.exports = (function (global) {
 
 			playerState.currentTime = currentTime;
 
-			//todo: go through all clips that need to be updated, started or stopped
 			/*
-			if (forward) {
-			} else {
-			}
-			todo: call updateFlow() after any events are started/ended
+			todo: if currentTime is < 0 or > duration
+			- fire ended accordingly
+			- clamp currentTime
 			*/
+
+			if (clipsByStart.length) {
+				//go through all clips that need to be updated, started or stopped
+				//todo: if seeking, use binarySearch
+
+				// play advancing
+				if (forward) {
+					// deactivate any clips that have passed
+					clip = clipsByEnd[endIndex];
+					while (clip && clip.end() <= currentTime) {
+						needUpdateFlow = true;
+						clip.deactivate();
+
+						endIndex++;
+						clip = clipsByEnd[endIndex];
+					}
+
+					// activate any clips that are current
+					clip = clipsByStart[startIndex];
+					while (clip && clip.start() <= currentTime) {
+						//todo: only if clip, plugin and layer are enabled
+						needUpdateFlow = true;
+						clip.activate();
+
+						startIndex++;
+						clip = clipsByStart[startIndex];
+					}
+
+				// play receding
+				} else {
+					// activate any clips that are current
+					clip = clipsByStart[startIndex];
+					while (clip && clip.start() > currentTime) {
+						//todo: only if clip, plugin and layer are enabled
+						needUpdateFlow = true;
+						clip.activate();
+
+						startIndex--;
+						clip = clipsByStart[startIndex];
+					}
+
+					// deactivate any clips that are not current
+					clip = clipsByEnd[endIndex];
+					while (clip && clip.end() > currentTime) {
+						needUpdateFlow = true;
+						clip.deactivate();
+
+						endIndex--;
+						clip = clipsByEnd[endIndex];
+					}
+				}
+
+				if (needUpdateFlow) {
+					updateFlow();
+				}
+			}
 
 			//todo: if any one clip's currentTime is too far off expected value, fire 'waiting'
 			//todo: if timeController is no longer active, select a new one
@@ -332,6 +398,11 @@ module.exports = (function (global) {
 			lastCurrentTime = currentTime;
 		}
 
+		/*
+		todo: rename `draw` to `render`, as it will be agnostic of the kind of tracks/compositors
+		being used. Each compositor will supply its own timing callback. we can't assume
+		requestAnimationFrame for everything
+		*/
 		function draw() {
 			if (now() - lastUpdateTime > updateThrottle) {
 				update();
@@ -357,7 +428,7 @@ module.exports = (function (global) {
 			i = binarySearch(clipsByStart, clip, compareClipsByStart);
 			if (i >= 0) {
 				clipsByStart.splice(i, 1);
-				if (startIndex >= i) {
+				if (startIndex > i) {
 					startIndex--;
 				}
 			}
@@ -365,7 +436,7 @@ module.exports = (function (global) {
 			i = binarySearch(clipsByEnd, clip, compareClipsByEnd);
 			if (i >= 0) {
 				clipsByEnd.splice(i, 1);
-				if (endIndex >= i) {
+				if (endIndex > i) {
 					endIndex--;
 				}
 			}
@@ -377,14 +448,14 @@ module.exports = (function (global) {
 			//place clip into appropriate point in each queue
 			i = binarySearch(clipsByStart, clip, compareClipsByStart);
 			i = ~i; // jshint ignore:line
-			if (i <= startIndex) {
+			if (i < startIndex) {
 				startIndex++;
 			}
 			clipsByStart.splice(i, 0, clip);
 
 			i = binarySearch(clipsByEnd, clip, compareClipsByEnd);
 			i = ~i; // jshint ignore:line
-			if (i <= endIndex) {
+			if (i < endIndex) {
 				endIndex++;
 			}
 			clipsByEnd.splice(i, 0, clip);
@@ -434,9 +505,12 @@ module.exports = (function (global) {
 
 			//will only activate if in time range
 			//todo: only if clip, plugin and layer are enabled
+			/*
+			todo: remove this. unnecessary because addClipToLists calls update
 			if (playerState.currentTime >= clip.start() && playerState.currentTime < clip.end()) {
 				clip.activate();
 			}
+			*/
 
 			updateFlow();
 		}
@@ -1341,7 +1415,13 @@ module.exports = (function (global) {
 
 			//todo: update play/playing state
 			playerState.paused = false;
-			playing = true; //todo: temp!
+
+			/*
+			todo: only set play = true when actually playing
+			- not seeking
+			- all current clips are loaded
+			*/
+			playing = true;
 
 			//todo: check if all these clips are ready to play first
 			for (key in activeClips) {
@@ -1458,6 +1538,7 @@ module.exports = (function (global) {
 		});
 
 		//todo: allow this to be toggled and queried after create
+		//todo: auto-updates too?
 		autoDraw = options.autoDraw === undefined ? true : !!options.autoDraw;
 		if (autoDraw) {
 			requestAnimationFrame(draw);
