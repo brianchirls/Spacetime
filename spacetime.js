@@ -296,10 +296,9 @@ module.exports = (function () {
 		function update(force) {
 			var currentTime,
 				rightNow = now(),
-				direction = 1,
-				forward = true,
 				clip,
-				needUpdateFlow = false;
+				needUpdateFlow = false,
+				ended = false;
 
 			if (playing) {
 				currentTime = playerState.currentTime + (rightNow - lastUpdateTime) * playerState.playbackRate / 1000;
@@ -316,25 +315,20 @@ module.exports = (function () {
 				return;
 			}
 
-			if (currentTime < playerState.currentTime) {
-				forward = false;
-				direction = -1;
+			if (playerState.playbackRate > 0) {
+				ended = currentTime >= playerState.duration && !playerState.ended;
+			} else if (playerState.playbackRate < 0) {
+				ended = currentTime <= 0 && !playerState.ended;
 			}
-
+			currentTime = Math.min(Math.max(currentTime, 0), playerState.duration);
 			playerState.currentTime = currentTime;
-
-			/*
-			todo: if currentTime is < 0 or > duration
-			- fire ended accordingly
-			- clamp currentTime
-			*/
 
 			if (clipsByStart.length) {
 				//go through all clips that need to be updated, started or stopped
 				//todo: if seeking, use binarySearch
 
 				// play advancing
-				if (forward) {
+				if (currentTime >= playerState.currentTime) {
 					// deactivate any clips that have passed
 					clip = clipsByEnd[endIndex];
 					while (clip && clip.end() <= currentTime) {
@@ -391,6 +385,17 @@ module.exports = (function () {
 
 			//todo: maybe throttle this? could be an option
 			spacetime.emit('timeupdate');
+
+			if (ended) {
+				ended = playerState.ended;
+				playerState.ended = true;
+				spacetime.pause();
+				if (!ended) {
+					spacetime.emit('ended');
+				}
+			} else {
+				playerState.ended = false;
+			}
 
 			lastCurrentTime = currentTime;
 		}
@@ -1413,6 +1418,14 @@ module.exports = (function () {
 				return;
 			}
 
+			if (playerState.ended) {
+				if (playerState.playbackRate > 0) {
+					spacetime.currentTime = 0;
+				} else if (playerState.playbackRate < 0) {
+					spacetime.currentTime = playerState.duration;
+				}
+			}
+
 			//todo: update play/playing state
 			playerState.paused = false;
 
@@ -1447,6 +1460,10 @@ module.exports = (function () {
 				//todo: start seeking if necessary
 				//todo: don't do anything if abs(currentTime - value) < precision
 				//todo: don't do anything if !paused and (value - currentTime) is very small
+
+				//temp
+				playerState.currentTime = value;
+				update(true);
 			}
 		});
 
