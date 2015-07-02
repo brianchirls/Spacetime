@@ -1,4 +1,4 @@
-module.exports = (function (global) {
+module.exports = (function () {
 	'use strict';
 
 	var
@@ -122,7 +122,6 @@ module.exports = (function (global) {
 		//initialize object, private properties
 		var spacetime = this,
 			options = opts || {},
-			spacetime = this,
 			isDestroyed = false,
 			compositors = {},
 
@@ -199,8 +198,7 @@ module.exports = (function (global) {
 
 		function loadCompositor(list, type, def) {
 			var definition,
-				compositor,
-				name;
+				compositor;
 
 
 			if (list && !Array.isArray(list)) {
@@ -259,8 +257,7 @@ module.exports = (function (global) {
 		fired even when our tab is in the background.
 		*/
 		function updateFlow() {
-			var inc = -1,
-				iStart,
+			var iStart,
 				iEnd,
 				currentTime = playerState.currentTime,
 				diff = 0,
@@ -680,7 +677,6 @@ module.exports = (function (global) {
 
 			this.loadMetadata = function (values) {
 				var k,
-					i,
 					duration,
 					metadata = self.metadata,
 					changed = false,
@@ -1620,4 +1616,4 @@ module.exports = (function (global) {
 	});
 
 	return Spacetime;
-}(global));
+}());
