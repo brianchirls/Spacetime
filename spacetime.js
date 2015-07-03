@@ -214,7 +214,7 @@ module.exports = (function () {
 					list = [];
 				}
 			}
-			definition = findFirst((list || []).concat(def), function (comp) {
+			definition = findFirst((list || []).concat(def), (comp) => {
 				if (typeof comp === 'string') {
 					comp = globalCompositors[comp];
 				}
@@ -395,7 +395,7 @@ module.exports = (function () {
 			}
 
 			//todo: if any one clip's currentTime is too far off expected value, fire 'waiting'
-			forEach(activeClips, function (clip) {
+			forEach(activeClips, (clip) => {
 				clip.seek(playerState.currentTime, epsilon);
 			});
 
@@ -456,7 +456,7 @@ module.exports = (function () {
 
 			//todo: go through all clips that need to be redrawn
 
-			forEach(compositors, function (compositor) {
+			forEach(compositors, (compositor) => {
 				if (compositor && compositor.draw) {
 					compositor.draw.call(spacetime);
 				}
@@ -542,7 +542,7 @@ module.exports = (function () {
 			todo: allow option for blacklist or whitelist of which compositors to include for a clip
 			- e.g. use only the audio track of a video clip
 			*/
-			forEach(compositors, function (compositor) {
+			forEach(compositors, (compositor) => {
 				//todo: make sure it supports this type of clip
 				if (compositor && compositor.add) {
 					compositor.add.call(spacetime, clip);
@@ -604,14 +604,14 @@ module.exports = (function () {
 							if (typeof method === 'function') {
 								playerMethods[methodName] = method.bind(player);
 							} else if (writeable) {
-								playerMethods[methodName] = function (value) {
+								playerMethods[methodName] = (value) => {
 									if (value !== undefined) {
 										player[methodName] = value;
 									}
 									return player[methodName];
 								};
 							} else {
-								playerMethods[methodName] = function () {
+								playerMethods[methodName] = () => {
 									return player[methodName];
 								};
 							}
@@ -1171,7 +1171,7 @@ module.exports = (function () {
 				video: [],
 				audio: []
 			}, options.compositors),
-			function (list, type) {
+			(list, type) => {
 				compositors[type] = loadCompositor(list, type, defaultCompositors[type]);
 			}
 		);
@@ -1348,7 +1348,7 @@ module.exports = (function () {
 			if (clip) {
 				clip.deactivate();
 
-				forEach(compositors, function (compositor) {
+				forEach(compositors, (compositor) => {
 					//todo: make sure it supports this type of clip
 					if (compositor && compositor.remove) {
 						compositor.remove.call(spacetime, clip);
@@ -1460,7 +1460,7 @@ module.exports = (function () {
 			}
 
 			// destroy any clips on this layer
-			layer.clips.forEach(function (clip) {
+			layer.clips.forEach((clip) => {
 				spacetime.remove(clip.id);
 			});
 			layer.destroy();
@@ -1626,7 +1626,7 @@ module.exports = (function () {
 		*/
 
 		//set up all read-only 'properties'
-		readOnlyProperties.forEach(function (property) {
+		readOnlyProperties.forEach((property) => {
 			Object.defineProperty(spacetime, property, {
 				configurable: false,
 				enumerable: true,
@@ -1657,7 +1657,7 @@ module.exports = (function () {
 
 			spacetime.removeAllListeners();
 
-			forEach(compositors, function (compositor) {
+			forEach(compositors, (compositor) => {
 				if (compositor && compositor.destroy) {
 					compositor.destroy();
 				}
@@ -1678,11 +1678,11 @@ module.exports = (function () {
 		*/
 		this.draw = draw;
 
-		forEach(globalPlugins, function (plugin, key) {
+		forEach(globalPlugins, (plugin, key) => {
 			spacetime.plugin(key, plugin);
 		});
 
-		forEach(options.plugins, function (plugin, key) {
+		forEach(options.plugins, (plugin, key) => {
 			spacetime.plugin(key, plugin);
 		});
 
@@ -1747,7 +1747,7 @@ module.exports = (function () {
 	Spacetime.compositor('basic-audio', {
 		title: 'Basic Audio',
 		type: 'audio',
-		definition: function () {
+		definition () {
 			return {
 				properties: {
 					volume: function (element, volume) {
