@@ -23,7 +23,7 @@ module.exports = (function () {
 		maxGlobalId = Date.now(), //todo: come up with something better than this
 		globalPlugins = {},
 		globalCompositors = {},
-		minClipLength = 1 / 16,
+		minClipLength = 1 / 60,
 
 	/*
 		Global reference variables
@@ -186,14 +186,15 @@ module.exports = (function () {
 			updateThrottle = 16,
 
 			plugins = {},
-			compositorPlugins = {},
+			compositorPlugins = Object.create(null),
 
 			clipsByStart = [],
 			clipsByEnd = [],
-			clipsById = {},
-			activeClips = {},
+			clipsById = Object.create(null),
+			activeClips = Object.create(null),
+			currentClips = Object.create(null),
 
-			layersById = {},
+			layersById = Object.create(null),
 			layersOrder = [],
 
 			startIndex = 0,
@@ -238,17 +239,13 @@ module.exports = (function () {
 		}
 
 		function activateClip(clip) {
-			/*
-			todo: probably want to have this trigger Clip object, not other way around
-			that way we can check time range here
-			*/
 			activeClips[clip.id] = clip;
-			//todo: update play/waiting state
+			//todo: update playing/waiting state
 		}
 
 		function deactivateClip(clip) {
 			delete activeClips[clip.id];
-			//todo: update play/waiting state
+			//todo: update playing/waiting state
 		}
 
 		//todo: call updateFlow() any time waiting/playing state changes
@@ -302,6 +299,7 @@ module.exports = (function () {
 			var currentTime,
 				rightNow = now(),
 				clip,
+				epsilon = playing ? 1 / 10 : 1 / 100,
 				needUpdateFlow = false,
 				ended = false;
 
@@ -333,50 +331,59 @@ module.exports = (function () {
 				//todo: if seeking, use binarySearch
 
 				// play advancing
-				if (currentTime >= playerState.currentTime) {
+				if (lastCurrentTime <= currentTime) {
 					// deactivate any clips that have passed
 					clip = clipsByEnd[endIndex];
 					while (clip && clip.end() <= currentTime) {
 						needUpdateFlow = true;
+						delete currentClips[clip.id];
 						clip.deactivate();
 
 						endIndex++;
 						clip = clipsByEnd[endIndex];
 					}
+					endIndex = Math.min(endIndex, clipsByEnd.length - 1);
 
 					// activate any clips that are current
 					clip = clipsByStart[startIndex];
 					while (clip && clip.start() <= currentTime) {
 						//todo: only if clip, plugin and layer are enabled
 						needUpdateFlow = true;
+						currentClips[clip.id] = clip;
 						clip.activate();
 
 						startIndex++;
 						clip = clipsByStart[startIndex];
 					}
+					startIndex = Math.min(startIndex, clipsByStart.length - 1);
 
 				// play receding
 				} else {
+					epsilon *= -1;
+
 					// activate any clips that are current
 					clip = clipsByStart[startIndex];
 					while (clip && clip.start() > currentTime) {
-						//todo: only if clip, plugin and layer are enabled
 						needUpdateFlow = true;
-						clip.activate();
+						delete currentClips[clip.id];
+						clip.deactivate();
 
 						startIndex--;
 						clip = clipsByStart[startIndex];
 					}
+					startIndex = Math.max(startIndex, 0);
 
 					// deactivate any clips that are not current
 					clip = clipsByEnd[endIndex];
 					while (clip && clip.end() > currentTime) {
 						needUpdateFlow = true;
-						clip.deactivate();
+						currentClips[clip.id] = clip; //todo: check end against currentTime
+						clip.activate();
 
 						endIndex--;
 						clip = clipsByEnd[endIndex];
 					}
+					endIndex = Math.max(endIndex, 0);
 				}
 
 				if (needUpdateFlow) {
@@ -385,6 +392,10 @@ module.exports = (function () {
 			}
 
 			//todo: if any one clip's currentTime is too far off expected value, fire 'waiting'
+			forEach(activeClips, function (clip) {
+				clip.seek(playerState.currentTime, epsilon);
+			});
+
 			//todo: if timeController is no longer active, select a new one
 			//todo: tell clips which ones need to be loaded or abort loading
 
@@ -544,7 +555,7 @@ module.exports = (function () {
 			/*
 			todo: remove this. unnecessary because addClipToLists calls update
 			if (playerState.currentTime >= clip.start() && playerState.currentTime < clip.end()) {
-				clip.activate();
+				activateClip(clip);
 			}
 			*/
 		}
@@ -691,6 +702,7 @@ module.exports = (function () {
 			this.active = false;
 			this.id = id;
 			this.type = plugin.id;
+			this.enabled = true;
 
 			eventEmitterize(this);
 
@@ -773,12 +785,50 @@ module.exports = (function () {
 				}
 			};
 
+			/*
+			Check that currentTime is where it's supposed to be relative to
+			playerState.currentTime. If it's out of whack, then seek.
+
+			Seeking is allowed even when inactive so we can be cued up in advance
+			*/
+			this.seek = function (time, epsilon) {
+				var currentTime,
+					desiredTime,
+					diff;
+
+				currentTime = playerMethods.currentTime();
+				desiredTime = time - start + from;
+				diff = Math.abs(desiredTime - currentTime);
+
+				//todo: what happens if we don't have a duration yet?
+				if (desiredTime >= to) {
+					desiredTime = to;
+					this.pause();
+				} else if (desiredTime < from) {
+					desiredTime = from;
+					this.pause();
+				}
+				/*
+				todo: if we're supposed to be playing and we've just seeked
+				between from and to, resume playing
+				*/
+
+				//todo: don't do anything if (desiredTime - currentTime) is very small
+				if (diff > Math.abs(epsilon) && desiredTime < playerMethods.duration()) {
+					//todo: fire waiting? or
+					playerMethods.currentTime(desiredTime);
+				}
+			};
+
 			this.activate = function () {
-				if (!this.active) {
+				//todo: also check that layer is enabled
+				if (!this.active && this.enabled &&
+						this.start() <= playerState.currentTime &&
+						this.end() > playerState.currentTime) {
 					this.active = true;
 
-					if (playerMethods.activate) {
-						playerMethods.activate();
+					if (plugin.activate) {
+						plugin.activate();
 					}
 
 					//todo: seek to appropriate place based on parent's currentTime
@@ -795,11 +845,27 @@ module.exports = (function () {
 				if (this.active) {
 					this.active = false;
 
-					if (playerMethods.deactivate) {
-						playerMethods.deactivate();
+					if (plugin.deactivate) {
+						plugin.deactivate();
 					}
 					self.pause();
 					self.emit('deactivate', self);
+				}
+			};
+
+			this.enable = function () {
+				if (!this.enabled) {
+					this.enabled = true;
+					this.activate();
+					this.emit('enabled');
+				}
+			};
+
+			this.disable = function () {
+				if (this.enabled) {
+					this.enabled = false;
+					this.deactivate();
+					this.emit('disabled');
 				}
 			};
 
@@ -1665,7 +1731,7 @@ module.exports = (function () {
 	Spacetime.plugin('', function (options) {
 		var currentTime = 0,
 			duration = NaN,
-			starTime;
+			startTime;
 
 		return {
 		};

@@ -40,7 +40,9 @@
   "jshintConfig": {
     "globals": {
       "console": true,
-      "require": true
+      "require": true,
+      "module": true,
+      "exports": true
     },
     "esnext": true,
     "bitwise": true,
