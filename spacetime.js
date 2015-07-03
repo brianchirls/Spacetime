@@ -12,7 +12,7 @@ module.exports = (function () {
 		hasOwn = require('./lib/utils').hasOwn,
 		consoleMethod = require('./lib/utils').consoleMethod,
 		findFirst = require('./lib/utils').findFirst,
-		forEach = require('lodash.foreach'),
+		forEach = require('lodash.foreach'), //todo: implement our own, faster
 		binarySearch = require('binary-search'),
 		Clock = require('./lib/clock'),
 
@@ -347,10 +347,11 @@ module.exports = (function () {
 					// activate any clips that are current
 					clip = clipsByStart[startIndex];
 					while (clip && clip.start() <= currentTime) {
-						//todo: only if clip, plugin and layer are enabled
-						needUpdateFlow = true;
-						currentClips[clip.id] = clip;
-						clip.activate();
+						if (clip.end() > currentTime) {
+							needUpdateFlow = true;
+							currentClips[clip.id] = clip;
+							clip.activate();
+						}
 
 						startIndex++;
 						clip = clipsByStart[startIndex];
@@ -376,9 +377,11 @@ module.exports = (function () {
 					// deactivate any clips that are not current
 					clip = clipsByEnd[endIndex];
 					while (clip && clip.end() > currentTime) {
-						needUpdateFlow = true;
-						currentClips[clip.id] = clip; //todo: check end against currentTime
-						clip.activate();
+						if (clip.start() <= currentTime) {
+							needUpdateFlow = true;
+							currentClips[clip.id] = clip;
+							clip.activate();
+						}
 
 						endIndex--;
 						clip = clipsByEnd[endIndex];
