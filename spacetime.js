@@ -1368,6 +1368,8 @@ module.exports = (function () {
 				//todo: destroy the clip?
 				clip.off('activate', activateClip);
 				clip.off('deactivate', deactivateClip);
+				clip.off('timechange', updateDuration);
+				clip.off('loadedmetadata', updateDuration);
 
 				//todo: fire event for clip removed with clip id
 
