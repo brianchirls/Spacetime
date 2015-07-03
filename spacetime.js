@@ -35,7 +35,6 @@ module.exports = (function () {
 		},
 
 		readOnlyProperties = [
-			'duration',
 			'ended',
 			'error',
 			'networkState',
@@ -140,7 +139,7 @@ module.exports = (function () {
 				//currentSrc?
 				//defaultMuted?
 				//defaultPlaybackRate?
-				duration: NaN,
+				duration: 0,
 				ended: false,
 				error: null,
 				height: 0,
@@ -170,6 +169,12 @@ module.exports = (function () {
 			playing = false, //is time actually progressing?
 			clock,
 			now,
+
+			/*
+			playerState.duration is the memoized calculated value.
+			duration is the value explicitly set, if any
+			*/
+			duration = Infinity,
 
 			autoDraw,
 			animationRequestId,
@@ -387,6 +392,7 @@ module.exports = (function () {
 			spacetime.emit('timeupdate');
 
 			if (ended) {
+				//todo: looping
 				ended = playerState.ended;
 				playerState.ended = true;
 				spacetime.pause();
@@ -398,6 +404,30 @@ module.exports = (function () {
 			}
 
 			lastCurrentTime = currentTime;
+		}
+
+		function updateDuration() {
+			var dur = 0, d = 0, i;
+
+			if (duration < Infinity) {
+				dur = duration;
+			} else {
+				for (i = clipsByEnd.length - 1; i >= 0; i--) {
+					d = clipsByEnd[i].end();
+					if (d < Infinity) {
+						dur = d;
+						break;
+					}
+				}
+			}
+
+			if (dur !== playerState.duration) {
+				playerState.duration = dur;
+				//todo: maybe we want to hold off on durationchange until all clips have a duration?
+				spacetime.emit('durationchange');
+				update(true);
+				updateFlow();
+			}
 		}
 
 		/*
@@ -469,6 +499,8 @@ module.exports = (function () {
 			- set any missing start times
 			- recalculate total duration
 			*/
+			updateDuration();
+			updateFlow();
 		}
 
 		function loadClip(clip) {
@@ -484,11 +516,13 @@ module.exports = (function () {
 			*/
 
 			/*
-			add listener to clip for when it changes and re-sort if
+			todo: add listener to clip for when it changes and re-sort if
 			start/end time are different
 			*/
 			clip.on('activate', activateClip);
 			clip.on('deactivate', deactivateClip);
+			clip.on('timechange', updateDuration);
+			clip.on('loadedmetadata', updateDuration);
 
 			/*
 			todo: allow option for blacklist or whitelist of which compositors to include for a clip
@@ -513,8 +547,6 @@ module.exports = (function () {
 				clip.activate();
 			}
 			*/
-
-			updateFlow();
 		}
 
 		/*
@@ -599,7 +631,7 @@ module.exports = (function () {
 				- reset readyState, networkState
 				- fire emptied, abort, whatever necessary events
 				*/
-				self.metadata.duration = NaN;
+				self.metadata.duration = Infinity;
 			}
 
 			function addToLayer(layerId) {
@@ -694,7 +726,7 @@ module.exports = (function () {
 				if (isNaN(duration)) {
 					duration = metadata.duration;
 				} else if (metadata.duration !== duration) {
-					metadata.duration = duration || NaN;
+					metadata.duration = duration || Infinity;
 					durationchange = true;
 				}
 
@@ -853,9 +885,7 @@ module.exports = (function () {
 			this.from = function (val) {
 				if (val !== undefined && !isNaN(val)) {
 					from = Math.max(0, val);
-					if (!isNaN(self.metadata.duration)) {
-						from = Math.min(self.metadata.duration, from);
-					}
+					from = Math.min(self.metadata.duration, from);
 
 					//todo: seek to current position, pause or loop if outside range
 					//todo: come up with an event to fire if this value changed
@@ -980,7 +1010,7 @@ module.exports = (function () {
 			this.reset = reset;
 
 			this.metadata = {
-				duration: NaN
+				duration: Infinity
 			};
 
 			this.start(options.start || 0);
@@ -1448,6 +1478,15 @@ module.exports = (function () {
 			return spacetime;
 		};
 
+		this.load = function (start, end) {
+			/*
+			todo: make from, to optional allowing determination of which section
+			to load. This would enable management of child compositions.
+			load(0, 0) means just metadata
+			*/
+			return spacetime;
+		};
+
 		Object.defineProperty(this, 'currentTime', {
 			configurable: false,
 			enumerable: true,
@@ -1467,12 +1506,34 @@ module.exports = (function () {
 			}
 		});
 
-		/*
-		todo: allow setting of duration
-		if duration is less than existing clips:
-		- if currentTime > duration: pause, currentTime = duration
-		- keep all clips but force them to abort loading after duration
-		*/
+		Object.defineProperty(this, 'duration', {
+			configurable: false,
+			enumerable: true,
+			get: function () {
+				return playerState.duration === Infinity ? 0 : playerState.duration;
+			},
+			set: function (value) {
+				var newDuration;
+				/*
+				if duration is less than existing clips:
+				- if currentTime > duration: pause, currentTime = duration
+				- keep all clips but force them to abort loading after duration
+				*/
+				newDuration = parseFloat(value);
+
+				//throw error if not a number or not in range
+				if (newDuration < 0 || isNaN(value)) {
+					throw new Error('Invalid duration value: ' + value);
+				}
+
+				//todo: allow setting Infinity to go back to auto
+				if (duration !== newDuration) {
+					duration = newDuration;
+					updateDuration();
+				}
+			}
+		});
+
 
 		/*
 		todo: more writeable properties
@@ -1572,9 +1633,6 @@ module.exports = (function () {
 			clock = new Clock();
 		}
 		now = clock.now;
-
-		//temp!!!
-		playerState.duration = 20;
 	}
 
 	Spacetime.plugin = function (hook, definition) {
