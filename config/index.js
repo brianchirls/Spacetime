@@ -14,6 +14,11 @@ module.exports = (function () {
 
 	var common = {
 		// entry: './src/entry.js',
+		node: {
+			process: false,
+			Buffer: false,
+			setImmediate: false
+		},
 		module: {
 			preLoaders: [
 				{

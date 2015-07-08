@@ -1,33 +1,32 @@
 module.exports = (function () {
 	'use strict';
 
-	var
+	const
 
 	/*
 		Utility functions (other files)
 	*/
 		eventEmitterize = require('./lib/event-emitterize'),
 		parseTimeCode = require('./lib/parse-timecode'),
-		extend = require('./lib/utils').extend,
-		hasOwn = require('./lib/utils').hasOwn,
-		consoleMethod = require('./lib/utils').consoleMethod,
-		findFirst = require('./lib/utils').findFirst,
 		forEach = require('lodash.foreach'), //todo: implement our own, faster
 		binarySearch = require('binary-search'),
+		nextTick = require('next-tick'),
 		Clock = require('./lib/clock'),
-
-	/*
-		Global "environment" variables
-	*/
-
-		maxGlobalId = Date.now(), //todo: come up with something better than this
-		globalPlugins = {},
-		globalCompositors = {},
-		minClipLength = 1 / 60,
+		{
+			extend,
+			hasOwn,
+			nop,
+			always,
+			recall,
+			consoleMethod,
+			findFirst
+		} = require('./lib/utils'),
 
 	/*
 		Global reference variables
 	*/
+		minClipLength = 1 / 60,
+
 		defaultCompositors = {
 			audio: ['basic-audio'],
 			video: ['dom-video']
@@ -47,23 +46,79 @@ module.exports = (function () {
 
 	// boolean value represents whether this is a writeable property
 		clipPlayerMethods = {
-			play: false,
-			pause: false,
+			play: {
+				exposed: true,
+				def: nop,
+				trigger: ['play', 'playing']
+			},
+			pause: {
+				exposed: true,
+				def: nop,
+				trigger: ['pause']
+			},
 			//src: true, should just use modify, since this always needs to handle an existing player
-			currentTime: true,
-			load: false,
-			duration: false,
-			playbackRate: true,
-			width: true,
-			height: true,
-			videoWidth: false,
-			videoHeight: false,
-			volume: true,
-			muted: true,
+			currentTime: {
+				writeable: true,
+				exposed: true,
+				def: recall(0),
+				trigger: ['seeking', 'seeked']
+			},
+			load: {
+				writeable: false,
+				exposed: false,
+				def: nop
+			},
+			duration: {
+				def: always(0)
+			},
+			playbackRate: {
+				writeable: true,
+				def: recall(1)
+			},
+			volume: {
+				writeable: true,
+				exposed: false,
+				def: recall(1),
+				trigger: ['volumechange']
+			},
+			muted: {
+				writeable: true,
+				exposed: false,
+				def: recall(false),
+				trigger: ['volumechange']
+			},
+			readyState: {
+				exposed: true,
+				def: always(4)
+			},
+			networkState: {
+				exposed: true,
+				def: always(1)
+			},
+			seeking: {
+				exposed: true,
+				def: always(false)
+			},
 			//draw: false,?
 			//loop: true, this will probably be managed by Spacetime
-			destroy: false
+			destroy: {
+				writeable: false,
+				exposed: false,
+				def: nop
+			}
 		},
+		clipPlayerEvents = [
+			'pause',
+			'play',
+			'playing',
+			'progress',
+			'seeked',
+			'seeking',
+			'stalled',
+			'suspend',
+			'waiting'
+		],
+
 
 	/*
 	shims and API status
@@ -73,6 +128,14 @@ module.exports = (function () {
 	*/
 		requestAnimationFrame = require('./lib/raf').requestAnimationFrame,
 		cancelAnimationFrame = require('./lib/raf').cancelAnimationFrame;
+
+	/*
+		Global "environment" variables
+	*/
+	var
+		maxGlobalId = Date.now(), //todo: come up with something better than this
+		globalPlugins = {},
+		globalCompositors = {};
 
 	/*
 		utility functions
@@ -148,6 +211,7 @@ module.exports = (function () {
 				networkState: 0,
 				paused: true,
 				playbackRate: 1,
+				playing: false, //is time actually progressing?
 				//played, todo: new timeRanges object
 				//poster?
 				preload: 'none',
@@ -166,7 +230,6 @@ module.exports = (function () {
 			lastUpdateTime = 0,
 			lastCurrentTime = -1,
 			timeout = -1,
-			playing = false, //is time actually progressing?
 			clock,
 			now,
 
@@ -266,7 +329,7 @@ module.exports = (function () {
 				delay = currentTime;
 
 			clock.clearTimeout(timeout);
-			if (playing && playerState.playbackRate) {
+			if (playerState.playing && playerState.playbackRate) {
 				if (playerState.playbackRate > 0) {
 					delay = playerState.duration - currentTime;
 					iEnd = endIndex;
@@ -299,11 +362,11 @@ module.exports = (function () {
 			var currentTime,
 				rightNow = now(),
 				clip,
-				epsilon = playing ? 1 / 10 : 1 / 100,
+				epsilon = playerState.playing ? 1 / 10 : 1 / 100,
 				needUpdateFlow = false,
 				ended = false;
 
-			if (playing) {
+			if (playerState.playing) {
 				currentTime = playerState.currentTime + (rightNow - lastUpdateTime) * playerState.playbackRate / 1000;
 			} else {
 				currentTime = playerState.currentTime;
@@ -318,10 +381,12 @@ module.exports = (function () {
 				return;
 			}
 
-			if (playerState.playbackRate > 0) {
-				ended = currentTime >= playerState.duration && !playerState.ended;
-			} else if (playerState.playbackRate < 0) {
-				ended = currentTime <= 0 && !playerState.ended;
+			if (!playerState.ended && playerState.duration) {
+				if (playerState.playbackRate > 0) {
+					ended = currentTime >= playerState.duration;
+				} else if (playerState.playbackRate < 0) {
+					ended = currentTime <= 0 && !playerState.ended;
+				}
 			}
 			currentTime = Math.min(Math.max(currentTime, 0), playerState.duration);
 			playerState.currentTime = currentTime;
@@ -445,6 +510,59 @@ module.exports = (function () {
 		}
 
 		/*
+		scan through all clips to determine whether we can play, whether
+		we are done seeking.
+		todo: set loading state here
+		*/
+		function checkPlayingState() {
+			var id,
+				clip,
+				readyState = 4,
+				clipsPlaying = true;
+
+			for (id in activeClips) {
+				if (hasOwn(activeClips, id)) {
+					clip = activeClips[id];
+					if (!clip.playing) {
+						clipsPlaying = false;
+					}
+					readyState = Math.min(readyState, clip.readyState());
+					if (clip.seeking() || readyState < 2) {
+						break;
+					}
+				}
+			}
+
+			playerState.readyState = readyState;
+			if (readyState > 1) {
+				if (playerState.seeking) {
+					playerState.seeking = false;
+					spacetime.emit('seeked');
+				}
+				if (!playerState.seeking && !playerState.playing && !playerState.paused) {
+					playerState.playing = true;
+					for (id in activeClips) {
+						if (hasOwn(activeClips, id)) {
+							activeClips[id].play();
+						}
+					}
+					spacetime.emit('playing');
+				}
+			} else if (!clipsPlaying && playerState.playing) {
+				playerState.playing = false;
+				playerState.readyState = 3;
+				for (id in activeClips) {
+					if (hasOwn(activeClips, id)) {
+						activeClips[id].pause();
+					}
+				}
+				spacetime.emit('waiting');
+			}
+
+			updateFlow();
+		}
+
+		/*
 		todo: rename `draw` to `render`, as it will be agnostic of the kind of tracks/compositors
 		being used. Each compositor will supply its own timing callback. we can't assume
 		requestAnimationFrame for everything
@@ -535,8 +653,32 @@ module.exports = (function () {
 			*/
 			clip.on('activate', activateClip);
 			clip.on('deactivate', deactivateClip);
-			clip.on('timechange', updateDuration);
-			clip.on('loadedmetadata', updateDuration);
+			clip.on([
+				'timechange',
+				'loadedmetadata'
+			], updateDuration);
+			clip.on([
+				'seeking',
+				'seeked',
+				'playing',
+				'waiting'
+			], checkPlayingState);
+
+			//temp for debuggin
+			[
+				'waiting',
+				'seeking',
+				'seeked',
+				'playing',
+				'play',
+				// 'progress',
+				'stalled',
+				'suspend'
+			].forEach((evt) => {
+				clip.on(evt, (e) => {
+					console.log(evt, e && e.target.currentTime, e && e.target.seeking, e && e.target.src);
+				});
+			});
 
 			/*
 			todo: allow option for blacklist or whitelist of which compositors to include for a clip
@@ -582,6 +724,20 @@ module.exports = (function () {
 				id = options.id,
 				initialized = false,
 				playerMethods = {},
+				playerEvents = {
+					playing: (e) => {
+						self.playing = true;
+						self.emit('playing', e);
+					},
+					waiting: (e) => {
+						self.playing = false;
+						self.emit('waiting', e);
+					},
+					pause: (e) => {
+						self.playing = false;
+						self.emit('pause', e);
+					}
+				},
 
 				start,
 				end,
@@ -595,30 +751,58 @@ module.exports = (function () {
 			function reset(player) {
 				//todo: do we need more parameters?
 
-				function setUpProperty(methodName, writeable) {
+				function makePlayerMethod(methodName, spec) {
 					var method = plugin[methodName] || methodName;
+
+					function triggerEvents() {
+						spec.trigger.forEach((evt) => {
+							if (playerEvents[evt]) {
+								playerEvents[evt]();
+							}
+							nextTick(() => {
+								self.emit(evt);
+							});
+						});
+					}
 
 					if (typeof method === 'string') {
 						if (player) {
 							method = player[method];
 							if (typeof method === 'function') {
-								playerMethods[methodName] = method.bind(player);
-							} else if (writeable) {
-								playerMethods[methodName] = (value) => {
-									if (value !== undefined) {
+								return method.bind(player);
+							}
+
+							if (spec.writeable) {
+								return (value) => {
+									if (value !== undefined && player[methodName] !== value) {
 										player[methodName] = value;
+										if (spec.trigger && !player.addEventListener) {
+											triggerEvents();
+										}
 									}
 									return player[methodName];
 								};
-							} else {
-								playerMethods[methodName] = () => {
-									return player[methodName];
-								};
 							}
+
+							return () => {
+								return player[methodName];
+							};
 						}
 					} else if (typeof method === 'function') {
-						playerMethods[methodName] = method.bind(self);
+						return method.bind(self);
 					}
+
+					if (spec.trigger && !player.addEventListener) {
+						return (value) => {
+							if (!spec.writeable || value !== undefined && spec.def() !== value) {
+								spec.def(value);
+								triggerEvents();
+							}
+							return spec.def();
+						};
+					}
+
+					return spec.def || nop;
 				}
 
 				var key;
@@ -626,9 +810,22 @@ module.exports = (function () {
 				player = typeof player === 'object' && player;
 				for (key in clipPlayerMethods) {
 					if (hasOwn(clipPlayerMethods, key)) {
-						delete playerMethods[key];
-						setUpProperty(key, clipPlayerMethods[key]);
+						playerMethods[key] = makePlayerMethod(key, clipPlayerMethods[key]);
+						if (clipPlayerMethods[key].exposed) {
+							self[key] = playerMethods[key];
+						}
 					}
+				}
+
+				if (player && player.addEventListener && player.removeEventListener) {
+					clipPlayerEvents.forEach((evt) => {
+						if (playerEvents[evt]) {
+							player.removeEventListener(evt, playerEvents[evt]);
+						} else {
+							playerEvents[evt] = self.emit.bind(self, evt);
+						}
+						player.addEventListener(evt, playerEvents[evt]);
+					});
 				}
 
 				//todo: what about a method for getting buffered sections?
@@ -645,6 +842,7 @@ module.exports = (function () {
 				- reset readyState, networkState
 				- fire emptied, abort, whatever necessary events
 				*/
+				self.playing = false;
 				self.metadata.duration = Infinity;
 			}
 
@@ -706,6 +904,7 @@ module.exports = (function () {
 			this.id = id;
 			this.type = plugin.id;
 			this.enabled = true;
+			this.playing = false;
 
 			eventEmitterize(this);
 
@@ -774,25 +973,12 @@ module.exports = (function () {
 				}
 			};
 
-			this.play = function () {
-				//todo: update play/playing state
-				if (playerMethods.play) {
-					playerMethods.play();
-				}
-			};
-
-			this.pause = function () {
-				//todo: update play/playing state
-				if (playerMethods.pause) {
-					playerMethods.pause();
-				}
-			};
-
 			/*
 			Check that currentTime is where it's supposed to be relative to
 			playerState.currentTime. If it's out of whack, then seek.
 
 			Seeking is allowed even when inactive so we can be cued up in advance
+			todo: account for clip playing at a different playbackRate than parent
 			*/
 			this.seek = function (time, epsilon) {
 				var currentTime,
@@ -837,7 +1023,7 @@ module.exports = (function () {
 					//todo: seek to appropriate place based on parent's currentTime
 
 					// if parent is playing, try to play
-					if (playing && playerState.playbackRate) {
+					if (playerState.playing && playerState.playbackRate) {
 						self.play();
 					}
 					self.emit('activate', self);
@@ -1499,8 +1685,9 @@ module.exports = (function () {
 
 			//todo: update play/playing state
 			playerState.paused = true;
-			playing = false; //todo: temp!
 
+			//todo: temp!
+			playerState.playing = false;
 			for (key in activeClips) {
 				if (hasOwn(activeClips, key)) {
 					activeClips[key].pause();
@@ -1513,7 +1700,7 @@ module.exports = (function () {
 		};
 
 		this.play = function () {
-			var key;
+			// var key;
 
 			if (!playerState.paused) {
 				return;
@@ -1527,24 +1714,13 @@ module.exports = (function () {
 				}
 			}
 
-			//todo: update play/playing state
 			playerState.paused = false;
 
-			/*
-			todo: only set play = true when actually playing
-			- not seeking
-			- all current clips are loaded
-			*/
-			playing = true;
+			checkPlayingState();
 
-			//todo: check if all these clips are ready to play first
-			for (key in activeClips) {
-				if (hasOwn(activeClips, key)) {
-					activeClips[key].play();
-				}
-			}
+			//todo: start loading from currentTime
 
-			updateFlow();
+			update();
 
 			return spacetime;
 		};
@@ -1565,15 +1741,26 @@ module.exports = (function () {
 				return playerState.currentTime;
 			},
 			set: function (value) {
-				value = parseFloat(value);
-				//todo: throw error if not a number or not in range
-				//todo: start seeking if necessary
-				//todo: don't do anything if abs(currentTime - value) < precision
-				//todo: don't do anything if !paused and (value - currentTime) is very small
+				var diff,
+					time = parseFloat(value);
 
-				//temp
-				playerState.currentTime = value;
-				update(true);
+				//throw error if not a number or not in range
+				if (time < 0 || time > spacetime.duration || isNaN(time)) {
+					throw new Error('Invalid currentTime value: ' + value);
+				}
+
+				//don't do anything if abs(currentTime - value) < precision
+				//don't do anything if !paused and (value - currentTime) is very small
+				diff = time - playerState.currentTime;
+				if (Math.abs(diff) > 1 / 100/* &&
+						!(playerState.playing && diff < 0.1 * playerState.playbackRate)*/) {
+
+					//start seeking if necessary
+					playerState.seeking = true;
+					spacetime.emit('seeking');
+					playerState.currentTime = time;
+					update(true);
+				}
 			}
 		});
 
@@ -1644,7 +1831,7 @@ module.exports = (function () {
 			var i;
 
 			isDestroyed = true;
-			playing = false;
+			playerState.playing = false;
 
 			cancelAnimationFrame(animationRequestId); //todo: handle this in clock
 			clock.clear();
