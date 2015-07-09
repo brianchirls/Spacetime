@@ -12,6 +12,7 @@ module.exports = (function () {
 		binarySearch = require('binary-search'),
 		nextTick = require('next-tick'),
 		Clock = require('./lib/clock'),
+		TimeRanges = require('./lib/time-ranges'),
 		{
 			extend,
 			hasOwn,
@@ -36,6 +37,7 @@ module.exports = (function () {
 		readOnlyProperties = [
 			'ended',
 			'error',
+			'buffered',
 			'networkState',
 			'paused',
 			'readyState',
@@ -69,7 +71,10 @@ module.exports = (function () {
 				def: nop
 			},
 			duration: {
-				def: always(0)
+				def: always(minClipLength)
+			},
+			buffered: {
+				def: always(Infinity)
 			},
 			playbackRate: {
 				writeable: true,
@@ -193,9 +198,10 @@ module.exports = (function () {
 			/*
 			todo: move most of the below stuff into an object that can be accessed by modules
 			*/
+			buffered = new TimeRanges(),
 			playerState = {
 				autoplay: false,
-				//buffered, todo: new timeRanges object
+				buffered: buffered.pub,
 				//controls?
 				//crossOrigin?
 				currentTime: 0,
@@ -485,6 +491,51 @@ module.exports = (function () {
 			lastCurrentTime = currentTime;
 		}
 
+		function updateBuffered(start, end) {
+			/*
+			Scan through all clips that overlap with this range and find places
+			where they're all buffered. First, add the whole clip. Then, subtract
+			all parts of clips in that range that are not buffered.
+
+			todo: use much wider range if a clip length is reduced
+			todo: only use enabled clips
+			todo: figure out how to tell if anything changed and fire progress
+			*/
+			var i, j,
+				clip,
+				rangeStart,
+				rangeEnd,
+				clipStart;
+
+			buffered.add(start, end);
+
+			for (i = 0; i < clipsByStart.length; i++) {
+				clip = clipsByStart[i];
+				clipStart = clip.start();
+
+				if (clip.start() > end) {
+					break;
+				}
+
+				if (clip.end() >= start) {
+					rangeStart = 0;
+					for (j = 0; j < clip.buffered.length; j++) {
+						rangeEnd = clip.buffered.start(j);
+						if (rangeEnd > rangeStart) {
+							buffered.subtract(rangeStart + clipStart, rangeEnd + clipStart);
+						}
+						rangeStart = clip.buffered.end(j);
+					}
+					rangeEnd = clip.end() - clipStart;
+					if (rangeEnd > rangeStart) {
+						buffered.subtract(rangeStart + clipStart, rangeEnd + clipStart);
+					}
+				}
+			}
+
+			spacetime.emit('progress');
+		}
+
 		function updateDuration() {
 			var dur = 0, d = 0, i;
 
@@ -506,6 +557,7 @@ module.exports = (function () {
 				spacetime.emit('durationchange');
 				update(true);
 				updateFlow();
+				updateBuffered(0, dur);
 			}
 		}
 
@@ -520,6 +572,11 @@ module.exports = (function () {
 				readyState = 4,
 				clipsPlaying = true;
 
+			/*
+			First, determine aggregate state of clips - whether they're playing,
+			whether they're ready to play.
+			todo: networkState
+			*/
 			for (id in activeClips) {
 				if (hasOwn(activeClips, id)) {
 					clip = activeClips[id];
@@ -535,10 +592,18 @@ module.exports = (function () {
 
 			playerState.readyState = readyState;
 			if (readyState > 1) {
+				/*
+				If we've finished seeking, fire the 'seeked' event
+				*/
 				if (playerState.seeking) {
 					playerState.seeking = false;
 					spacetime.emit('seeked');
 				}
+
+				/*
+				If all clips are ready to play and they're supposed to play,
+				play them and fire 'playing event'
+				*/
 				if (!playerState.seeking && !playerState.playing && !playerState.paused) {
 					playerState.playing = true;
 					for (id in activeClips) {
@@ -549,6 +614,10 @@ module.exports = (function () {
 					spacetime.emit('playing');
 				}
 			} else if (!clipsPlaying && playerState.playing) {
+				/*
+				We were playing, but now we're not anymore because at least
+				one clip has stopped. So pause the others and fire 'waiting'.
+				*/
 				playerState.playing = false;
 				playerState.readyState = 3;
 				for (id in activeClips) {
@@ -657,6 +726,15 @@ module.exports = (function () {
 				'timechange',
 				'loadedmetadata'
 			], updateDuration);
+
+			//todo: also fire when loading is reset
+			clip.on(['progress', 'empty'], () => {
+				updateBuffered(clip.start(), clip.end());
+			});
+			clip.on('timechange', () => {
+				updateBuffered(0, playerState.duration);
+			});
+
 			clip.on([
 				'seeking',
 				'seeked',
@@ -671,7 +749,7 @@ module.exports = (function () {
 				'seeked',
 				'playing',
 				'play',
-				// 'progress',
+				'progress',
 				'stalled',
 				'suspend'
 			].forEach((evt) => {
@@ -691,18 +769,10 @@ module.exports = (function () {
 				}
 			});
 
+			//addClipToLists calls update and will activate this clip if necessary
 			addClipToLists(clip);
 
 			//todo: fire event for clip added, with clip id
-
-			//will only activate if in time range
-			//todo: only if clip, plugin and layer are enabled
-			/*
-			todo: remove this. unnecessary because addClipToLists calls update
-			if (playerState.currentTime >= clip.start() && playerState.currentTime < clip.end()) {
-				activateClip(clip);
-			}
-			*/
 		}
 
 		/*
@@ -736,6 +806,10 @@ module.exports = (function () {
 					pause: (e) => {
 						self.playing = false;
 						self.emit('pause', e);
+					},
+					progress: (e) => {
+						updateClipBuffered();
+						self.emit('progress', e);
 					}
 				},
 
@@ -747,6 +821,24 @@ module.exports = (function () {
 
 				minTime = 0,
 				maxTime = Infinity;
+
+			function updateClipBuffered() {
+				var buffered = playerMethods.buffered(),
+					i, range;
+
+				//todo: account for from/to
+
+				if (typeof buffered === 'number' && !isNaN(buffered)) {
+					if (playerMethods.readyState()) {
+						buffered = Math.min(buffered, self.metadata.duration);
+					} else {
+						buffered = 0;
+					}
+					self.buffered.reset(buffered);
+				} else if (buffered && buffered.start && buffered.end) {
+					self.buffered.copy(buffered);
+				}
+			}
 
 			function reset(player) {
 				//todo: do we need more parameters?
@@ -828,8 +920,6 @@ module.exports = (function () {
 					});
 				}
 
-				//todo: what about a method for getting buffered sections?
-
 				/*
 				todo: if cannot play currently set source object, fire error
 				- name: "MediaError",
@@ -844,6 +934,7 @@ module.exports = (function () {
 				*/
 				self.playing = false;
 				self.metadata.duration = Infinity;
+				updateClipBuffered();
 			}
 
 			function addToLayer(layerId) {
@@ -905,6 +996,7 @@ module.exports = (function () {
 			this.type = plugin.id;
 			this.enabled = true;
 			this.playing = false;
+			this.buffered = new TimeRanges();
 
 			eventEmitterize(this);
 
@@ -968,6 +1060,8 @@ module.exports = (function () {
 							self.emit('timechange', self);
 						}
 					}
+
+					updateClipBuffered();
 
 					self.emit('loadedmetadata', self, metadata);
 				}
@@ -1075,6 +1169,7 @@ module.exports = (function () {
 				- e.g. src on video needs reset; new text for a text effect does not
 				- anything that makes buffered go backwards should cause a reset (or change duration?)
 				*/
+				updateClipBuffered();
 			};
 
 			/*
@@ -1791,7 +1886,6 @@ module.exports = (function () {
 				}
 			}
 		});
-
 
 		/*
 		todo: more writeable properties
