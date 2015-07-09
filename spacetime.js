@@ -27,6 +27,7 @@ module.exports = (function () {
 		Global reference variables
 	*/
 		minClipLength = 1 / 60,
+		loadAheadTime = 10,
 
 		defaultCompositors = {
 			audio: ['basic-audio'],
@@ -65,11 +66,16 @@ module.exports = (function () {
 				def: recall(0),
 				trigger: ['seeking', 'seeked']
 			},
+			/*
+			gonna disable this for now, since .load() on a media element is destructive,
+			and this should be idempotent. So this will need to be implemented on the
+			plugin unless there is a good use case for attaching it to the player
 			load: {
 				writeable: false,
 				exposed: false,
 				def: nop
 			},
+			*/
 			duration: {
 				def: always(minClipLength)
 			},
@@ -137,7 +143,7 @@ module.exports = (function () {
 	/*
 		Global "environment" variables
 	*/
-	var
+	let
 		maxGlobalId = Date.now(), //todo: come up with something better than this
 		globalPlugins = {},
 		globalCompositors = {};
@@ -148,19 +154,17 @@ module.exports = (function () {
 
 	function guid(prefix) {
 		//todo: do a better job of converting prefix to a string
-		var id = (prefix || '') + maxGlobalId;
+		const id = (prefix || '') + maxGlobalId;
 		maxGlobalId++;
 		return id;
 	}
 
 	function compareClipsByStart(a, b) {
-		var diff;
-
 		if (a === b) {
 			return 0;
 		}
 
-		diff = a.start() - b.start() ||
+		let diff = a.start() - b.start() ||
 			(a.end() || a.start()) - (b.end() || b.start());
 
 		if (!diff) {
@@ -171,11 +175,11 @@ module.exports = (function () {
 	}
 
 	function compareClipsByEnd(a, b) {
-		var diff;
 		if (a === b) {
 			return 0;
 		}
-		diff = (a.end() || a.start()) - (b.end() || b.start()) ||
+
+		let diff = (a.end() || a.start()) - (b.end() || b.start()) ||
 			a.start() - b.start();
 
 		if (!diff) {
@@ -187,8 +191,9 @@ module.exports = (function () {
 
 	function Spacetime(opts) {
 		//initialize object, private properties
-		var spacetime = this,
-			options = opts || {},
+		const spacetime = this;
+
+		let options = opts || {},
 			isDestroyed = false,
 			compositors = {},
 
@@ -309,12 +314,10 @@ module.exports = (function () {
 
 		function activateClip(clip) {
 			activeClips[clip.id] = clip;
-			//todo: update playing/waiting state
 		}
 
 		function deactivateClip(clip) {
 			delete activeClips[clip.id];
-			//todo: update playing/waiting state
 		}
 
 		//todo: call updateFlow() any time waiting/playing state changes
@@ -361,6 +364,48 @@ module.exports = (function () {
 
 				//setTimeout takes milliseconds
 				timeout = clock.setTimeout(update, delay * 1000);
+			}
+		}
+
+		//tell clips which ones need to be loaded/queued
+		/*
+		todo: can we tell clips to abort loading?
+
+		I'd like to get more advanced and keep track of how many clips are actively
+		using the network. Maybe even number of live network connections for each
+		clip, so we can account for nested compositions. lookAheadTime would be
+		adjusted based on number of network connections in use.
+		*/
+		function updateLoadingClips() {
+			const direction = playerState.playbackRate >= 0 ? 1 : -1,
+				currentTime = playerState.currentTime,
+				clips = playerState.playbackRate >= 0 ? clipsByStart : clipsByEnd,
+				loadAhead = loadAheadTime * Math.abs(playerState.playbackRate);
+
+			let i = playerState.playbackRate >= 0 ? startIndex : endIndex,
+				delta = 0,
+				count = 0,
+				time = 0,
+				clip;
+
+			while (count < 10 && i >= 0 && i < clips.length) {
+				clip = clips[i];
+				time = direction > 0 ? clip.start() : clip.end();
+				delta = (time - currentTime) * direction;
+				if (delta >= loadAhead) {
+					break;
+				}
+
+				if (!clip.isCurrent()) {
+					clip.seek(time, 1 / 60);
+				}
+
+				//todo: load from currentTime, not from clip edge time; round to nearest 5 secs?
+				//todo: take into account preload settings
+				clip.load(Math.min(time, time + loadAhead * direction), Math.max(time, time + loadAhead * direction));
+
+				i += direction;
+				count++;
 			}
 		}
 
@@ -470,8 +515,7 @@ module.exports = (function () {
 				clip.seek(playerState.currentTime, epsilon);
 			});
 
-			//todo: if timeController is no longer active, select a new one
-			//todo: tell clips which ones need to be loaded or abort loading
+			updateLoadingClips();
 
 			//todo: maybe throttle this? could be an option
 			spacetime.emit('timeupdate');
@@ -790,8 +834,8 @@ module.exports = (function () {
 			- accessor methods. internal shift?
 			- how are they affected by trim?
 			*/
-			var self = this,
-				id = options.id,
+			const self = this;
+			let id = options.id,
 				initialized = false,
 				playerMethods = {},
 				playerEvents = {
@@ -821,6 +865,14 @@ module.exports = (function () {
 
 				minTime = 0,
 				maxTime = Infinity;
+
+			/*
+			takes time in context of global timeline and converts to time in context
+			of this clip's media. Considers start, from and to.
+			*/
+			function localPlayTime(time) {
+				return time - start + from;
+			}
 
 			function updateClipBuffered() {
 				var buffered = playerMethods.buffered(),
@@ -997,6 +1049,7 @@ module.exports = (function () {
 			this.enabled = true;
 			this.playing = false;
 			this.buffered = new TimeRanges();
+			this.spacetime = spacetime;
 
 			eventEmitterize(this);
 
@@ -1067,6 +1120,12 @@ module.exports = (function () {
 				}
 			};
 
+			this.load = function (start, end) {
+				if (plugin.load) {
+					plugin.load(Math.max(0, localPlayTime(start)), localPlayTime(end));
+				}
+			};
+
 			/*
 			Check that currentTime is where it's supposed to be relative to
 			playerState.currentTime. If it's out of whack, then seek.
@@ -1080,7 +1139,7 @@ module.exports = (function () {
 					diff;
 
 				currentTime = playerMethods.currentTime();
-				desiredTime = time - start + from;
+				desiredTime = localPlayTime(time);
 				diff = Math.abs(desiredTime - currentTime);
 
 				//todo: what happens if we don't have a duration yet?
@@ -1104,23 +1163,20 @@ module.exports = (function () {
 			};
 
 			this.activate = function () {
-				//todo: also check that layer is enabled
-				if (!this.active && this.enabled &&
-						this.start() <= playerState.currentTime &&
-						this.end() > playerState.currentTime) {
-					this.active = true;
+				if (!this.active && this.isEnabled() &&
+						this.isCurrent()) {
 
-					if (plugin.activate) {
+					let loadStart = playerMethods.currentTime(),
+						loadEnd = loadStart + loadAheadTime * playerState.playbackRate;
+
+					//todo: take into account preload settings
+					this.load(loadStart, loadEnd);
+
+					if (plugin.activate && !this.active) {
+						this.active = true;
 						plugin.activate();
+						self.emit('activate', self);
 					}
-
-					//todo: seek to appropriate place based on parent's currentTime
-
-					// if parent is playing, try to play
-					if (playerState.playing && playerState.playbackRate) {
-						self.play();
-					}
-					self.emit('activate', self);
 				}
 			};
 
@@ -1290,7 +1346,6 @@ module.exports = (function () {
 			};
 
 			this.splice = function (min, max) {
-				var newClip;
 				if (isNaN(max) || max < min) {
 					max = min;
 				}
@@ -1305,7 +1360,7 @@ module.exports = (function () {
 						self.end() > max && self.start() < min) {
 
 					//break clip into two pieces and splice out the middle
-					newClip = self.clone();
+					let newClip = self.clone();
 					newClip.trim(max);
 					self.trim(0, min);
 
@@ -1341,9 +1396,7 @@ module.exports = (function () {
 			Note: clone is for internal use only and does not add new clip to timeline anywhere
 			*/
 			this.clone = function () {
-				var opts = extend({}, options),
-					newClip;
-
+				let opts = extend({}, options);
 				extend(opts, {
 					id: guid('spacetime'),
 					start: start,
@@ -1353,11 +1406,25 @@ module.exports = (function () {
 					layer: null
 				});
 
-				newClip = new Clip(plugin, opts);
-				return newClip;
+				return new Clip(plugin, opts);
 			};
 
 			this.reset = reset;
+
+			/*
+			info methods
+			*/
+			this.isActive = () => this.isActive;
+
+			this.isEnabled = () => {
+				//todo: also check that layer, compositor and plugin are enabled
+				return this.enabled;
+			};
+
+			this.isCurrent = () => {
+				return this.start() <= playerState.currentTime &&
+					this.end() > playerState.currentTime;
+			};
 
 			this.metadata = {
 				duration: Infinity
@@ -1395,7 +1462,7 @@ module.exports = (function () {
 		};
 
 		Layer = function (options) {
-			var self = this;
+			const self = this;
 
 			function sortClips() {
 				self.clips.sort(compareClipsByStart);
@@ -1595,7 +1662,7 @@ module.exports = (function () {
 		//add or update a clip
 		//todo: allow batch loading of multiple clips
 		this.add = function (hook, options) {
-			var id = guid('spacetime'); //todo: allow forced id?
+			const id = guid('spacetime'); //todo: allow forced id?
 
 			/*
 			todo:
@@ -1623,8 +1690,7 @@ module.exports = (function () {
 
 		//remove a clip
 		this.remove = function (clipId) {
-			var clip = clipsById[clipId],
-				i;
+			const clip = clipsById[clipId];
 
 			if (clip) {
 				clip.deactivate();
@@ -1795,8 +1861,6 @@ module.exports = (function () {
 		};
 
 		this.play = function () {
-			// var key;
-
 			if (!playerState.paused) {
 				return;
 			}
@@ -1811,11 +1875,12 @@ module.exports = (function () {
 
 			playerState.paused = false;
 
+			updateLoadingClips();
 			checkPlayingState();
 
 			//todo: start loading from currentTime
 
-			update();
+			update(true);
 
 			return spacetime;
 		};

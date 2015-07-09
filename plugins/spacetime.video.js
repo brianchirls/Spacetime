@@ -52,7 +52,7 @@
 		}
 
 		function getPlayer(source) {
-			var i;
+			var i, end;
 
 			//todo: proper element type check, in case of iframes?
 			if (source instanceof HTMLVideoElement) {
@@ -62,6 +62,12 @@
 			} else {
 				if (!video) {
 					video = document.createElement('video');
+					end = clip.end();
+					if (end > 0 && end < Infinity) {
+						video.preload = 'none';
+					} else {
+						video.preload = 'metadata';
+					}
 					ownElement = true;
 					addListeners();
 				} else {
@@ -95,6 +101,14 @@
 		return {
 			element: video,
 			player: video,
+			load: function (start, end) {
+				/*
+				todo: make this smarter and/or more aggressive?
+				*/
+				if (!video.networkState || !video.readyState && video.networkState !== 2) {
+					video.load();
+				}
+			},
 			modify: function (options, changes) {
 				//todo: test for equality of options.src and changes.src
 				//todo: remove any event listeners
