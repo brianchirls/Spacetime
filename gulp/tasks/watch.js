@@ -10,5 +10,11 @@
 			'compositors/**/*',
 			'plugins/**/*'
 		], ['dev']);
+
+		gulp.watch([
+			'spacetime.js',
+			'lib/**/*',
+			'test/*.js'
+		], ['build-test']);
 	});
 }());

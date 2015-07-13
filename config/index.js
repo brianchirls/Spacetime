@@ -80,6 +80,17 @@ module.exports = (function () {
 		}
 	});
 
+	exports.test = assign({}, common, {
+		//debug: true,
+		devtool: 'inline-source-map', //sourcemap?
+		output: {
+			filename: 'test.js'
+		},
+		node: {
+			fs: 'empty'
+		}
+	});
+
 	exports.production = assign({}, common, {
 		devtool: 'source-map',
 		output: {
