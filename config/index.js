@@ -87,7 +87,9 @@ module.exports = (function () {
 			filename: 'test.js'
 		},
 		node: {
-			fs: 'empty'
+			fs: 'empty',
+			Buffer: false,
+			setImmediate: false
 		}
 	});
 

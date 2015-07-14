@@ -2,6 +2,7 @@
 
 import test from 'tape';
 import TimeRanges from '../lib/time-ranges';
+import parseTimeCode from '../lib/parse-timecode';
 
 test('TimeRanges', function (t) {
 	var ranges = new TimeRanges();
@@ -170,4 +171,22 @@ test('TimeRanges', function (t) {
 
 	ranges.subtract(0, 20);
 	t.equal(ranges.ranges.length, 0, 'Subtract everything');
+
+	t.end();
+});
+
+test('parseTimeCode', function (t) {
+	t.equal(parseTimeCode(1.2), 1.2, 'seconds as number');
+	t.ok(isNaN(parseTimeCode('not a number')), 'bad number returns NaN');
+	t.ok(isNaN(parseTimeCode(null)), 'null returns NaN');
+	t.equal(parseTimeCode('1.2'), 1.2, 'seconds as decimal');
+	t.equal(parseTimeCode('1:2', 30), 62, 'min:sec, no frame rate');
+	t.equal(parseTimeCode('1;2', 30), 1 + 2 / 30, 'sec;frames with frame rate');
+	t.equal(parseTimeCode('1:2:3'), 60 * 60 + 2 * 60 + 3, 'hours:min:sec, no frame rate');
+	t.equal(parseTimeCode('1:2:3.4'), 60 * 60 + 2 * 60 + 3.4, 'hours:min:sec, seconds as decimal, no frame rate');
+	t.equal(parseTimeCode('1:2:3;4'), 60 * 60 + 2 * 60 + 3, 'hours:min:sec;frames without frame rate');
+	t.equal(parseTimeCode('1:2:3;4', 30), 60 * 60 + 2 * 60 + 3 + 4 / 30, 'hours:min:sec;frames with frame rate');
+	t.equal(parseTimeCode('1:2;3', 30), 60 + 2 + 3 / 30, 'min:sec;frames with frame rate');
+
+	t.end();
 });
