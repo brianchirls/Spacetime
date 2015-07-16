@@ -3,6 +3,8 @@
 import test from 'tape';
 import TimeRanges from '../lib/time-ranges';
 import parseTimeCode from '../lib/parse-timecode';
+import eventEmitterize from '../lib/event-emitterize';
+import Spacetime from '../spacetime';
 
 test('TimeRanges', function (t) {
 	var ranges = new TimeRanges();
@@ -188,5 +190,111 @@ test('parseTimeCode', function (t) {
 	t.equal(parseTimeCode('1:2:3;4', 30), 60 * 60 + 2 * 60 + 3 + 4 / 30, 'hours:min:sec;frames with frame rate');
 	t.equal(parseTimeCode('1:2;3', 30), 60 + 2 + 3 / 30, 'min:sec;frames with frame rate');
 
+	t.end();
+});
+
+test('Event Emitter', function (t) {
+	var obj,
+		secondary,
+		ref,
+		counts = {
+			once: 0,
+			on: 0
+		},
+		methods = [
+			'on', 'off', 'once', 'emit', 'removeAllListeners', 'addEventListener', 'removeEventListener'
+		];
+
+	function removeMe(arg) {
+		t.fail('Removed event should never run (' + arg + ')');
+	}
+
+	secondary = eventEmitterize();
+	t.ok(secondary && typeof secondary === 'object' && typeof secondary.on === 'function',
+		'running with no params creates an object');
+
+	obj = {};
+	eventEmitterize(obj);
+	methods.forEach((key) => {
+		t.equal(typeof obj[key], 'function', 'event emitter has method ' + key);
+	});
+
+	t.equal(obj.on, obj.addEventListener, 'addEventListener is a synonym for on');
+	t.equal(obj.off, obj.removeEventListener, 'removeEventListener is a synonym for off');
+
+	// emit
+	secondary.on('none', () => {
+		t.fail('Event should not be fired on another object');
+	});
+	obj.on('never', () => {
+		t.fail('Callback should not be invoked on another event');
+	});
+	ref = obj.emit('none');
+	t.equal(ref, obj, 'emit: returns self object');
+
+	// once
+	ref = obj.once('once', function () {
+		counts.once++;
+		t.equal(counts.once, 1, 'Once runs only once');
+		t.equal(this, obj, 'once: context');
+	});
+	t.equal(ref, obj, 'once: returns self object');
+
+	obj.emit('once');
+	obj.emit('once');
+	t.equal(counts.once, 1, 'once has actually run once');
+
+	obj.once('once-removed', removeMe);
+	obj.off('once-removed', removeMe);
+	obj.emit('once-removed', 'once-removed');
+	obj.once('once-remove-all', removeMe);
+	obj.once('once-remove-all-events', removeMe);
+	obj.removeAllListeners('once-remove-all');
+	obj.emit('once-remove-all');
+	obj.removeAllListeners();
+	obj.emit('once-remove-all-events');
+
+	// on
+	ref = obj.on('on', function () {
+		if (!counts.on) {
+			t.equal(this, obj, 'on: context');
+		}
+		counts.on++;
+	});
+	t.equal(ref, obj, 'on: returns self object');
+
+	obj.emit('on');
+	obj.emit('on');
+	t.equal(counts.on, 2, 'on has actually run twice');
+
+	obj.on('on-removed', removeMe);
+	obj.off('on-removed', removeMe);
+	obj.emit('on-removed', 'on-removed');
+	obj.once('on-remove-all', removeMe);
+	obj.once('on-remove-all-events', removeMe);
+	obj.removeAllListeners('on-remove-all');
+	obj.emit('on-remove-all');
+	obj.removeAllListeners();
+	obj.emit('on-remove-all-events');
+
+	t.end();
+});
+
+test('Spacetime Static Methods', function (t) {
+	var statics = ['plugin', 'compositor'];
+
+	t.plan(statics.length);
+
+	statics.forEach((key) => {
+		t.equal(typeof Spacetime[key], 'function', 'Spacetime.' + key + '() is a static function');
+	});
+});
+
+test('Spacetime.destroy()', function (t) {
+	// todo: make spacetime and destroy it
+	// todo: make a clip and a layer and make sure they get destroyed
+	// todo: look for appropriate events
+	// todo: check isDestroyed
+	// todo: make sure emitted events don't fire after destroyed
 	t.end();
 });
