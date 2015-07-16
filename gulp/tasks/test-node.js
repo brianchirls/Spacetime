@@ -8,7 +8,7 @@
 	gulp.task('test-node', function () {
 		var stream = tape.createStream();
 
-		requireUncached('../../build/test.js');
+		requireUncached('../../build/test-common.js');
 
 		return stream
 			.pipe(tapSpec());

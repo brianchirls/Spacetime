@@ -2,6 +2,11 @@
 	'use strict';
 
 	var gulp = require('gulp');
+	var runSequence = require('run-sequence');
+
+	gulp.task('dev-tests', function () {
+		runSequence('dev', 'build-tests');
+	});
 
 	gulp.task('watch', function () {
 		gulp.watch([
@@ -9,12 +14,6 @@
 			'lib/**/*',
 			'compositors/**/*',
 			'plugins/**/*'
-		], ['dev']);
-
-		gulp.watch([
-			'spacetime.js',
-			'lib/**/*',
-			'test/*.js'
-		], ['build-test']);
+		], ['dev-tests']);
 	});
 }());

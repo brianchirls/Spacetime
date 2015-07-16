@@ -4,6 +4,6 @@
 	var runSequence = require('run-sequence');
 
 	gulp.task('test', function(callback) {
-		runSequence('build-test', 'test-node');
+		runSequence('build-test-node', 'test-node');
 	});
 }());
