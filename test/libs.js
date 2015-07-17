@@ -32,6 +32,16 @@ test('TimeRanges', function (t) {
 		}
 	], 'Second range added');
 
+	t.ok(ranges.includes(2), 'Includes min');
+	t.ok(ranges.includes(4), 'Includes max');
+	t.ok(ranges.includes(2, 4), 'Includes min-max');
+	t.ok(ranges.includes(7, 7.5), 'Includes inside second range');
+	t.notOk(ranges.includes(1), 'Does not include < min');
+	t.notOk(ranges.includes(5), 'Does not include > max');
+	t.notOk(ranges.includes(1, 3), 'Does not include range overlapping min');
+	t.notOk(ranges.includes(3, 5), 'Does not include range overlapping max');
+	t.notOk(ranges.includes(4, 2), 'Does not include backwards range');
+
 	t.equal(ranges.pub.length, ranges.ranges.length, 'public object matches internal (length)');
 	t.equal(ranges.pub.start(1), ranges.start(1), 'public object matches internal (start)');
 	t.equal(ranges.pub.end(1), ranges.end(1), 'public object matches internal (end)');
