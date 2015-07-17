@@ -446,6 +446,7 @@ module.exports = (function () {
 			where they're all buffered. First, add the whole clip. Then, subtract
 			all parts of clips in that range that are not buffered.
 
+			todo: calculate canplaythrough, canplayall, etc. and fire events
 			todo: use much wider range if a clip length is reduced
 			todo: only use enabled clips
 			todo: figure out how to tell if anything changed and fire progress
@@ -514,6 +515,7 @@ module.exports = (function () {
 		scan through all clips to determine whether we can play, whether
 		we are done seeking.
 		todo: set loading state here
+		todo: move readyState out of here and into updateBuffered
 		*/
 		function checkPlayingState() {
 			var id,
@@ -586,7 +588,7 @@ module.exports = (function () {
 		requestAnimationFrame for everything
 		*/
 		function draw() {
-			if (now() - lastUpdateTime > updateThrottle) {
+			if (clock.now() - lastUpdateTime > updateThrottle) {
 				update();
 			}
 
@@ -642,12 +644,8 @@ module.exports = (function () {
 			}
 			clipsByEnd.splice(i, 0, clip);
 
-			update(true);
-
 			/*
-			todo:
-			- set any missing start times
-			- recalculate total duration
+			todo: set any missing start times
 			*/
 			updateDuration();
 			updateFlow();
@@ -994,7 +992,16 @@ module.exports = (function () {
 		//add or update a clip
 		//todo: allow batch loading of multiple clips
 		this.add = function (hook, options) {
-			const id = guid('spacetime'); //todo: allow forced id?
+			let id;
+
+			if (options.id) {
+				if (clipsById[options.id]) {
+					throw new Error('Clip with id ' + options.id + ' already exists');
+				}
+				id = options.id;
+			} else {
+				id = guid('spacetime');
+			}
 
 			/*
 			todo:
@@ -1017,6 +1024,7 @@ module.exports = (function () {
 
 			loadClip(new Clip(internal, plugins[hook], options), options.layer);
 
+			//todo: maybe it should return the clip? see what jQuery does
 			return spacetime;
 		};
 
@@ -1058,14 +1066,75 @@ module.exports = (function () {
 			return spacetime;
 		};
 
+		this.getClipById = function (id) {
+			var clip = clipsById[id];
+			return clip && clip.pub || null;
+		};
+
+		/*
+		search by:
+		- from/to in timeline
+		- plugin(s)
+		- output type
+		- layer
+		- enabled/disabled?
+		- active/inactive?
+		- plugin-specific properties?
+
+		todo: might be fun to make this return an iterator one day
+		*/
+		this.findClips = function (search) {
+			var results = [],
+				clip,
+				i;
+
+			for (i = 0; i < clipsByStart.length; i++) {
+				clip = clipsByStart[i];
+
+				if (search) {
+					// to
+					if (search.to < Infinity && clip.start() > search.to) {
+						// done searching
+						break;
+					}
+
+					// jscs:disable disallowKeywords
+
+					// from
+					if (search.from > 0 && clip.end() < search.from) {
+						continue;
+					}
+
+					// todo: we may rename 'plugin' to something else?
+					if (Array.isArray(search.plugin) && search.plugin.indexOf(clip.type) < 0 ||
+							typeof search.plugin === 'string' && clip.type !== search.plugin) {
+						continue;
+					}
+
+					/*
+					todo:
+					- output/compositor type(s)
+					- layer
+					- enabled/disabled?
+					- active/inactive?
+					- etc...
+					*/
+
+					// jscs:enable disallowKeywords
+				}
+
+				results.push(clip.pub);
+			}
+
+			return results;
+		};
+
 		/*
 		todo: add a method to test if a prospective clip is compatible, i.e.:
 		- there is a plugin that canPlay the clip
 		- the currently loaded compositor can handle both the plugin and the clip
 		*/
 
-		//todo: list/search clips by time, hook, layer and/or id
-		//todo: getClipById - need public clip class
 		//todo: get history of added clip ids?
 		//todo: enable/disable clip .disable(), .disable('video'), .disable(['video', '3d'])
 		//todo: move a clip from one layer to another
@@ -1363,13 +1432,6 @@ module.exports = (function () {
 			spacetime.plugin(key, plugin);
 		});
 
-		//todo: allow this to be toggled and queried after create
-		//todo: auto-updates too?
-		autoDraw = options.autoDraw === undefined ? true : !!options.autoDraw;
-		if (autoDraw) {
-			draw();
-		}
-
 		/*
 		todo:
 		- allow passing of clock options to clock if needed?
@@ -1381,6 +1443,13 @@ module.exports = (function () {
 			clock = new Clock();
 		}
 		now = clock.now;
+
+		//todo: allow this to be toggled and queried after create
+		//todo: auto-updates too?
+		autoDraw = options.autoDraw === undefined ? true : !!options.autoDraw;
+		if (autoDraw) {
+			draw();
+		}
 	}
 
 	Spacetime.plugin = function (hook, definition) {
