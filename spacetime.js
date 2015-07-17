@@ -356,6 +356,9 @@ module.exports = (function () {
 						needUpdateFlow = true;
 						delete currentClips[clip.id];
 						clip.deactivate();
+						/*
+						todo: do not deactivate clip if currentTime === playerState.duration
+						*/
 
 						endIndex++;
 						clip = clipsByEnd[endIndex];
@@ -497,11 +500,11 @@ module.exports = (function () {
 				}
 			}
 
+			update(true);
 			if (dur !== playerState.duration) {
 				playerState.duration = dur;
 				//todo: maybe we want to hold off on durationchange until all clips have a duration?
 				spacetime.emit('durationchange');
-				update(true);
 				updateFlow();
 				updateBuffered(0, dur);
 			}
