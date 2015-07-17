@@ -6,9 +6,9 @@
 	} else if(typeof define === 'function' && define.amd) {
 		define(factory);
 	} else if(typeof exports === 'object') {
-		exports['SpacetimeVideo'] = factory();
+		exports.SpacetimeVideo = factory();
 	} else {
-		root['SpacetimeVideo'] = factory();
+		root.SpacetimeVideo = factory();
 	}
 
 }(this, function () {
@@ -23,15 +23,13 @@
 		function loadNewData() {
 			if (video && video.readyState) {
 				if (!hasMetadata) {
+					hasMetadata = true;
 					clip.loadMetadata({
 						duration: video.duration,
 						videoWidth: video.videoWidth,
 						videoHeight: video.videoHeight
 					});
-					hasMetadata = true;
 				}
-
-				//todo: update time ranges
 			}
 		}
 
@@ -105,6 +103,10 @@
 				/*
 				todo: make this smarter and/or more aggressive?
 				*/
+				if (video.preload === 'none') {
+					// This is necessary because .load() doesn't work in firefox if preload is 'none'
+					video.preload = '';
+				}
 				if (!video.networkState || !video.readyState && video.networkState !== 2) {
 					video.load();
 				}
@@ -158,7 +160,7 @@
 		};
 	}
 
-	SpacetimeVideo.compositors = ['dom-video', 'seriously']
+	SpacetimeVideo.compositors = ['dom-video', 'seriously'];
 	/*
 	todo:
 	- canPlayType:

@@ -104,9 +104,6 @@ module.exports = (function () {
 
 			Layer,
 
-			/*
-			todo: move most of the below stuff into an object that can be accessed by modules
-			*/
 			internal,
 			buffered = new TimeRanges(),
 			playerState = {
