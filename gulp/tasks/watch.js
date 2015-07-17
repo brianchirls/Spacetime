@@ -15,5 +15,9 @@
 			'compositors/**/*',
 			'plugins/**/*'
 		], ['dev-tests']);
+
+		gulp.watch([
+			'test/*.js'
+		], ['build-tests']);
 	});
 }());
