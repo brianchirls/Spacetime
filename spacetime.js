@@ -1367,7 +1367,7 @@ module.exports = (function () {
 		//todo: auto-updates too?
 		autoDraw = options.autoDraw === undefined ? true : !!options.autoDraw;
 		if (autoDraw) {
-			requestAnimationFrame(draw);
+			draw();
 		}
 
 		/*
