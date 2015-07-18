@@ -1,8 +1,8 @@
 'use strict';
 
 import test from 'tape';
-import Spacetime from '../spacetime';
-import eventEmitterize from '../lib/event-emitterize';
+import Spacetime from '../src/spacetime';
+import eventEmitterize from '../src/event-emitterize';
 
 test('Spacetime Static Methods', function (t) {
 	var statics = ['plugin', 'compositor'];
@@ -70,6 +70,48 @@ test('Spacetime Instance Methods and Properties', function (t) {
 	t.equal(Object.keys(spacetime).length, methods.length + properties.length, 'No extra properties on Spacetime object');
 
 	spacetime.destroy();
+});
+
+test('Spacetime.duration', function (t) {
+	var spacetime = new Spacetime(),
+		expectedDuration = 0;
+
+	spacetime.plugin('test', function (options) {
+		var duration = NaN;
+		setTimeout(() => {
+			//todo: make sure this hasn't been destroyed
+			duration = options.duration || 10;
+			this.loadMetadata({
+				duration
+			});
+		}, 0);
+		return {
+			duration: () => duration,
+			readyState: () => {
+				return isNaN(duration) ? 0 : 4;
+			}
+		};
+	});
+
+	spacetime.on('durationchange', function () {
+		t.equal(spacetime.duration, expectedDuration, 'Duration changed to ' + expectedDuration);
+	});
+
+	t.equal(spacetime.duration, 0, 'Spacetime.duration starts at 0 with no clips');
+
+	spacetime.add('', {
+		start: 0
+	});
+
+	t.equal(spacetime.duration, 0, 'Spacetime.duration is 0 when no clips have duration');
+
+	spacetime.add('test', {
+		start: 1,
+		duration: 4
+	});
+
+	spacetime.destroy();
+	t.end();
 });
 
 test('Find clips', function (t) {

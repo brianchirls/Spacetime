@@ -10,8 +10,7 @@
 
 	gulp.task('watch', function () {
 		gulp.watch([
-			'spacetime.js',
-			'lib/**/*',
+			'src/**/*',
 			'compositors/**/*',
 			'plugins/**/*'
 		], ['dev-tests']);

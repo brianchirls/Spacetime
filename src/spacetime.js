@@ -6,20 +6,20 @@ module.exports = (function () {
 	/*
 		Utility functions (other files)
 	*/
-		eventEmitterize = require('./lib/event-emitterize'),
-		parseTimeCode = require('./lib/parse-timecode'),
+		eventEmitterize = require('./event-emitterize'),
+		parseTimeCode = require('./parse-timecode'),
 		forEach = require('lodash.foreach'), //todo: implement our own, faster
 		binarySearch = require('binary-search'),
-		Clip = require('./lib/clip'),
-		Clock = require('./lib/clock'),
-		TimeRanges = require('./lib/time-ranges'),
+		Clip = require('./clip'),
+		Clock = require('./clock'),
+		TimeRanges = require('./time-ranges'),
 		{
 			extend,
 			hasOwn,
 			guid,
 			consoleMethod,
 			findFirst
-		} = require('./lib/utils'),
+		} = require('./utils'),
 
 	/*
 		Global reference variables
@@ -50,8 +50,8 @@ module.exports = (function () {
 	- todo: move all now and timing stuff into Clock
 	- todo: move requestAnimationFrame into compositor
 	*/
-		requestAnimationFrame = require('./lib/raf').requestAnimationFrame,
-		cancelAnimationFrame = require('./lib/raf').cancelAnimationFrame;
+		requestAnimationFrame = require('./raf').requestAnimationFrame,
+		cancelAnimationFrame = require('./raf').cancelAnimationFrame;
 
 	/*
 		Global "environment" variables
@@ -749,20 +749,20 @@ module.exports = (function () {
 			], checkPlayingState);
 
 			//temp for debuggin
-			[
-				'waiting',
-				'seeking',
-				'seeked',
-				'playing',
-				'play',
-				'progress',
-				'stalled',
-				'suspend'
-			].forEach((evt) => {
-				clip.on(evt, (e) => {
-					console.log(evt, e && e.target.currentTime, e && e.target.seeking, e && e.target.src);
-				});
-			});
+			// [
+			// 	'waiting',
+			// 	'seeking',
+			// 	'seeked',
+			// 	'playing',
+			// 	'play',
+			// 	'progress',
+			// 	'stalled',
+			// 	'suspend'
+			// ].forEach((evt) => {
+			// 	clip.on(evt, (e) => {
+			// 		console.log(evt, e && e.target.currentTime, e && e.target.seeking, e && e.target.src);
+			// 	});
+			// });
 
 			/*
 			todo: allow option for blacklist or whitelist of which compositors to include for a clip
@@ -1488,8 +1488,7 @@ module.exports = (function () {
 		};
 	});
 
-	Spacetime.compositor('dom-video', require('./compositors/spacetime.dom-video'));
-
+	//todo: move this out into separate file; include it in the browser build?
 	Spacetime.compositor('basic-audio', {
 		title: 'Basic Audio',
 		type: 'audio',

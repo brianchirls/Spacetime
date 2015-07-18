@@ -7,7 +7,7 @@
 	gulp.task('dist', function () {
 		var config = require('../../config');
 
-		return gulp.src('./spacetime.js')
+		return gulp.src('./src/spacetime.js')
 			.pipe(webpack(config.production))
 			.pipe(gulp.dest('build'));
 	});

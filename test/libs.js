@@ -1,9 +1,9 @@
 'use strict';
 
 import test from 'tape';
-import TimeRanges from '../lib/time-ranges';
-import parseTimeCode from '../lib/parse-timecode';
-import eventEmitterize from '../lib/event-emitterize';
+import TimeRanges from '../src/time-ranges';
+import parseTimeCode from '../src/parse-timecode';
+import eventEmitterize from '../src/event-emitterize';
 
 test('TimeRanges', function (t) {
 	var ranges = new TimeRanges();

@@ -7,7 +7,7 @@
 	gulp.task('min', function () {
 		var config = require('../../config');
 
-		return gulp.src('./spacetime.js')
+		return gulp.src('./src/spacetime.js')
 			.pipe(webpack(config.min))
 			.pipe(gulp.dest('build'));
 	});

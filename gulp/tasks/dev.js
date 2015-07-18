@@ -6,7 +6,7 @@
 	gulp.task('dev', function () {
 		var config = require('../../config');
 
-		return gulp.src('./spacetime.js')
+		return gulp.src('./src/spacetime.js')
 			.pipe(webpack(config.dev))
 			.pipe(gulp.dest('build'));
 	});
