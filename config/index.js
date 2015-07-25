@@ -23,7 +23,7 @@ module.exports = (function () {
 			preLoaders: [
 				{
 					test: /\.js$/,
-					exclude: /node_modules|bower_components|src\/lib/,
+					exclude: /node_modules|bower_components/,
 					loader: 'jshint-loader'
 				},
 				{

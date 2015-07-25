@@ -14,9 +14,18 @@
 
 		return gulp.src('./test/test-common.js')
 			.pipe(webpack(assign({}, config.test, {
+				debug: false,
+				devtool: '',
 				output: {
-					filename: 'test-common.js'
-				}
+					filename: 'test-node.js',
+					libraryTarget: 'commonjs'
+				},
+				target: 'node',
+				externals: [
+					'binary-search',
+					'lodash.foreach',
+					'next-tick'
+				]
 			})))
 			.pipe(gulp.dest('build'))
 			.on('error', function(err) {
